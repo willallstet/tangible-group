@@ -67,7 +67,7 @@ def search_by_book_similarity(target_idx, books, book_embeddings, top_k=3):
 
 def get_top_similar_books(target_idx, books, book_embeddings, top_k=2):
     target_vec = book_embeddings[target_idx]
-    SIMILARITY_THRESHOLD = 0.5
+    SIMILARITY_THRESHOLD = 0.55
     
     scores = []
     for i, book_vec in enumerate(book_embeddings):
@@ -87,7 +87,7 @@ def get_top_books_by_query(query, books, book_embeddings, top_k=3):
     if not query_vec:
         return []
     
-    SIMILARITY_THRESHOLD = 0.5
+    SIMILARITY_THRESHOLD = 0.55
 
     scores = []
     for i, book_vec in enumerate(book_embeddings):
