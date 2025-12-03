@@ -1,6 +1,7 @@
 import json
 import glob
 import threading
+import time
 import numpy as np
 import os
 from pathlib import Path
@@ -33,10 +34,11 @@ except ImportError:
 DATA_FILE = "books.json"
 GEMINI_EMBED_MODEL = "models/text-embedding-004"
 DIAL_BAUDRATE = 115200
+LED_BAUDRATE = 115200
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
 CHAT_SYSTEM_PROMPT = (
-    "You are a friendly book guide. Ask light follow-up questions when helpful, "
+    "You are a friendly librarian. Ask light follow-up questions when helpful, "
     "then propose recommendations. After each reply include a line exactly like "
     "'SEARCH_QUERY: <concise keywords>' describing what you will search for next. "
     "Use 'SEARCH_QUERY: NONE' only when no search should be run."
@@ -165,6 +167,59 @@ class ChatManager:
         return clean_text, query
 
 
+class LEDController:
+    """Sends highlighted book positions to an Arduino over serial."""
+
+    def __init__(self, port=None, baudrate=LED_BAUDRATE):
+        self.port = port or os.environ.get("LED_SERIAL_PORT")
+        self.baudrate = baudrate
+        self.device = None
+
+        if serial is None:
+            print("LEDController: pyserial not installed; LEDs disabled.")
+            return
+
+        if not self.port:
+            print("LEDController: set LED_SERIAL_PORT to your Arduino device path.")
+            return
+
+        # Try the specified port, then try alternative paths if it fails
+        ports_to_try = [self.port]
+        if "/dev/cu." in self.port:
+            ports_to_try.append(self.port.replace("/dev/cu.", "/dev/tty."))
+        elif "/dev/tty." in self.port:
+            ports_to_try.append(self.port.replace("/dev/tty.", "/dev/cu."))
+
+        for attempt_port in ports_to_try:
+            for attempt in range(3):
+                try:
+                    self.device = serial.Serial(attempt_port, self.baudrate, timeout=1)
+                    if attempt_port != self.port:
+                        print(f"LEDController: opened {attempt_port} (tried {self.port} first)")
+                    else:
+                        print(f"LEDController: opened {attempt_port}")
+                    return
+                except serial.SerialException as exc:
+                    if attempt < 2:
+                        time.sleep(0.5)
+                    else:
+                        if attempt_port == ports_to_try[-1]:
+                            print(f"LEDController could not open {attempt_port} after retries: {exc}")
+                except Exception as exc:
+                    if attempt_port == ports_to_try[-1]:
+                        print(f"LEDController could not open {attempt_port}: {exc}")
+                    break
+
+    def send_positions(self, positions):
+        if not self.device:
+            return
+        payload = ",".join(str(pos) for pos in positions)
+        try:
+            self.device.write((payload + "\n").encode("utf-8"))
+        except Exception as exc:
+            print(f"LEDController write error: {exc}")
+
+
 def load_data(filename):
     with open(filename, "r") as f:
         return json.load(f)
@@ -238,13 +293,14 @@ def get_top_books_by_query(query, books, book_embeddings, top_k=3, window=None):
 
 
 class BookGUI(QMainWindow):
-    def __init__(self, books, book_embeddings, dial_reader=None, chat_manager=None):
+    def __init__(self, books, book_embeddings, dial_reader=None, chat_manager=None, led_controller=None):
         super().__init__()
         self.books = books
         self.book_embeddings = book_embeddings
         self.dial_reader = dial_reader
         self.dial_value = dial_reader.get_value() if dial_reader else 0.5
         self.chat_manager = chat_manager
+        self.led_controller = led_controller
         self.image_labels = []
         self.previously_glowing = []
         self.chat_display = None
@@ -363,12 +419,28 @@ class BookGUI(QMainWindow):
             if 0 <= idx < len(self.image_labels):
                 self.image_labels[idx].setStyleSheet("background-color: transparent;")
         self.previously_glowing = []
+        self.push_led_update([])
 
     def add_glow_to_books(self, indices):
         for idx in indices:
             if 0 <= idx < len(self.image_labels):
                 self.image_labels[idx].setStyleSheet("background-color: yellow;")
                 self.previously_glowing.append(idx)
+        self.push_led_update(indices)
+
+    def push_led_update(self, indices=None):
+        if not self.led_controller:
+            return
+        indices = indices if indices is not None else self.previously_glowing
+        positions = []
+        seen = set()
+        for idx in indices:
+            if 0 <= idx < len(self.books):
+                position = self.books[idx].get("Position")
+                if isinstance(position, int) and position not in seen:
+                    positions.append(position)
+                    seen.add(position)
+        self.led_controller.send_positions(positions)
 
     def append_chat_line(self, text):
         if not self.chat_display or not text:
@@ -486,8 +558,9 @@ def main():
         return
 
     dial_reader = None
+    led_controller = None
     if serial is None:
-        print("pyserial not installed; dial disabled.")
+        print("pyserial not installed; dial and LED features disabled.")
     else:
         reader = DialReader()
         if reader.port:
@@ -495,11 +568,18 @@ def main():
             dial_reader = reader
         else:
             print("DialReader could not find a serial device; dial disabled.")
+        led_controller = LEDController()
 
     chat_manager = ChatManager()
 
     app = QApplication([])
-    window = BookGUI(books, book_embeddings, dial_reader=dial_reader, chat_manager=chat_manager)
+    window = BookGUI(
+        books,
+        book_embeddings,
+        dial_reader=dial_reader,
+        chat_manager=chat_manager,
+        led_controller=led_controller,
+    )
     window.show()
     app.exec_()
 
