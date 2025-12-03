@@ -9,15 +9,12 @@ from PyQt5.QtWidgets import (
     QApplication,
     QMainWindow,
     QWidget,
-    QGridLayout,
     QLabel,
-    QScrollArea,
     QLineEdit,
     QVBoxLayout,
     QTextEdit,
 )
 from PyQt5.QtCore import Qt, QTimer
-from PyQt5.QtGui import QPixmap
 
 try:
     import serial  # type: ignore
@@ -301,13 +298,11 @@ class BookGUI(QMainWindow):
         self.dial_value = dial_reader.get_value() if dial_reader else 0.5
         self.chat_manager = chat_manager
         self.led_controller = led_controller
-        self.image_labels = []
         self.previously_glowing = []
         self.chat_display = None
         self.chat_input = None
         self.window_label = None
         self.timer = None
-        self.last_clicked_idx = None
         self.last_query = ""
 
         self.setWindowTitle("Book Similarity Browser (Dial)")
@@ -361,71 +356,26 @@ class BookGUI(QMainWindow):
         self.update_window_label()
         main_layout.addWidget(self.window_label)
 
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-        scroll_area.setStyleSheet("background-color: white; border: none;")
-
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet("background-color: white;")
-        grid_layout = QGridLayout(scroll_content)
-        grid_layout.setSpacing(20)
-        grid_layout.setContentsMargins(20, 20, 20, 20)
-
-        cols = 4
-        image_size = 200
-        for i, book in enumerate(books):
-            row = i // cols
-            col = i % cols
-            image_label = QLabel()
-            image_label.setFixedSize(image_size, image_size)
-            image_label.setAlignment(Qt.AlignCenter)
-            image_label.setCursor(Qt.PointingHandCursor)
-            image_label.setScaledContents(False)
-            image_label.setStyleSheet("background-color: transparent;")
-
-            image_path = book.get("Image", "")
-            if image_path and os.path.exists(image_path):
-                pixmap = QPixmap(image_path)
-                scaled_pixmap = pixmap.scaled(
-                    image_size, image_size, Qt.KeepAspectRatio, Qt.SmoothTransformation
-                )
-                image_label.setPixmap(scaled_pixmap)
-            else:
-                image_label.setText("No Image")
-                image_label.setStyleSheet(
-                    "border: 1px solid #ccc; color: #999; background-color: transparent;"
-                )
-
-            def make_click_handler(idx):
-                return lambda event: self.on_image_click(idx)
-
-            image_label.mousePressEvent = make_click_handler(i)
-
-            grid_layout.addWidget(image_label, row, col, Qt.AlignCenter)
-            self.image_labels.append(image_label)
-
-        scroll_area.setWidget(scroll_content)
-        main_layout.addWidget(scroll_area)
-
         if self.dial_reader:
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.sync_dial_value)
             self.timer.start(150)
 
     def clear_glow_effects(self):
-        for idx in self.previously_glowing:
-            if 0 <= idx < len(self.image_labels):
-                self.image_labels[idx].setStyleSheet("background-color: transparent;")
         self.previously_glowing = []
         self.push_led_update([])
 
     def add_glow_to_books(self, indices):
+        if not indices:
+            return
+        self.previously_glowing = indices
+        matching_books = []
         for idx in indices:
-            if 0 <= idx < len(self.image_labels):
-                self.image_labels[idx].setStyleSheet("background-color: yellow;")
-                self.previously_glowing.append(idx)
+            if 0 <= idx < len(self.books):
+                book = self.books[idx]
+                matching_books.append(f"{book.get('Title', 'Unknown')} by {book.get('Author', 'Unknown')}")
+        if matching_books:
+            print(f"Matching books: {', '.join(matching_books)}")
         self.push_led_update(indices)
 
     def push_led_update(self, indices=None):
@@ -467,7 +417,6 @@ class BookGUI(QMainWindow):
         if reply_text:
             self.append_chat_line(f"Bot: {reply_text}")
         if search_query:
-            self.append_chat_line(f"(Searching for: {search_query})")
             self.show_query_results(search_query)
 
     def show_query_results(self, query):
@@ -475,7 +424,6 @@ class BookGUI(QMainWindow):
             return
         self.clear_glow_effects()
         self.last_query = query
-        self.last_clicked_idx = None
         indices = get_top_books_by_query(
             query,
             self.books,
@@ -511,40 +459,19 @@ class BookGUI(QMainWindow):
         self.refresh_highlights()
 
     def refresh_highlights(self):
+        if not self.last_query:
+            return
         window = self.current_window_bounds()
-        if self.last_clicked_idx is not None:
-            self.clear_glow_effects()
-            indices = get_top_similar_books(
-                self.last_clicked_idx,
-                self.books,
-                self.book_embeddings,
-                top_k=2,
-                window=window,
-            )
-            self.add_glow_to_books(indices)
-        elif self.last_query:
-            self.clear_glow_effects()
-            indices = get_top_books_by_query(
-                self.last_query,
-                self.books,
-                self.book_embeddings,
-                top_k=3,
-                window=window,
-            )
-            self.add_glow_to_books(indices)
-
-    def on_image_click(self, clicked_idx):
         self.clear_glow_effects()
-        self.last_clicked_idx = clicked_idx
-        self.last_query = ""
-        indices = get_top_similar_books(
-            clicked_idx,
+        indices = get_top_books_by_query(
+            self.last_query,
             self.books,
             self.book_embeddings,
-            top_k=2,
-            window=self.current_window_bounds(),
+            top_k=3,
+            window=window,
         )
         self.add_glow_to_books(indices)
+
 
 def main():
     books = load_data(DATA_FILE)
