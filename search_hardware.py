@@ -12,9 +12,20 @@ from PyQt5.QtWidgets import (
     QLabel,
     QLineEdit,
     QVBoxLayout,
+    QHBoxLayout,
     QTextEdit,
+    QPushButton,
 )
 from PyQt5.QtCore import Qt, QTimer
+from PyQt5.QtGui import (
+    QFont,
+    QPalette,
+    QPainter,
+    QPainterPath,
+    QColor,
+    QPen,
+)
+import datetime
 
 try:
     import serial  # type: ignore
@@ -35,10 +46,10 @@ LED_BAUDRATE = 115200
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
 CHAT_SYSTEM_PROMPT = (
-    "You are a friendly librarian. Ask light follow-up questions when helpful, "
-    "then propose recommendations. After each reply include a line exactly like "
-    "'SEARCH_QUERY: <concise keywords>' describing what you will search for next. "
-    "Use 'SEARCH_QUERY: NONE' only when no search should be run."
+    "You are a library assistant. You help people discover their next great read. "
+    "Ask light follow-up questions when helpful, then propose recommendations. "
+    "After each reply include a line exactly like 'SEARCH_QUERY: <concise keywords>' "
+    "describing what you will search for next. Use 'SEARCH_QUERY: NONE' only when no search should be run."
 )
 
 
@@ -289,6 +300,66 @@ def get_top_books_by_query(query, books, book_embeddings, top_k=3, window=None):
     return [idx for score, idx in scores[:top_k]]
 
 
+class FolderFrame(QWidget):
+    """Custom container that draws a folder-like outline with diagonal tab edges."""
+
+    def __init__(self, bg_color, border_color, accent_color, parent=None):
+        super().__init__(parent)
+        self.bg_color = QColor(bg_color)
+        self.border_color = QColor(border_color)
+        self.accent_color = QColor(accent_color)
+        # We want transparency outside the folder shape
+        self.setAttribute(Qt.WA_TranslucentBackground)
+
+    def paintEvent(self, event):
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        rect = self.rect()
+
+        width = rect.width()
+        height = rect.height()
+
+        # Parameters to mimic file-folder tab with diagonal edges
+        margin = 8
+        tab_height = 36  # Shorter tab
+        tab_width = 200
+        diagonal = 10   # Slightly less pronounced diagonal
+
+        # Single continuous path for the folder outline
+        path = QPainterPath()
+        # Start at top-left of the main body (below the tab)
+        path.moveTo(margin, tab_height)
+        
+        # Tab shape
+        # Diagonal up to top-left of tab
+        path.lineTo(margin + diagonal, margin)
+        # Horizontal across top of tab
+        path.lineTo(margin + tab_width - diagonal, margin)
+        # Diagonal down to bottom-right of tab
+        path.lineTo(margin + tab_width, tab_height)
+        
+        # Top edge of the main body (right of tab)
+        path.lineTo(width - margin, tab_height)
+        
+        # Right edge
+        path.lineTo(width - margin, height - margin)
+        
+        # Bottom edge
+        path.lineTo(margin, height - margin)
+        
+        # Left edge (back to start)
+        path.lineTo(margin, tab_height)
+        
+        path.closeSubpath()
+
+        # Fill the folder shape with the background color
+        painter.fillPath(path, self.bg_color)
+
+        # Draw the border
+        painter.setPen(QPen(self.border_color, 2))
+        painter.drawPath(path)
+
+
 class BookGUI(QMainWindow):
     def __init__(self, books, book_embeddings, dial_reader=None, chat_manager=None, led_controller=None):
         super().__init__()
@@ -302,64 +373,187 @@ class BookGUI(QMainWindow):
         self.chat_display = None
         self.chat_input = None
         self.window_label = None
+        self.send_button = None
         self.timer = None
         self.last_query = ""
 
-        self.setWindowTitle("Book Similarity Browser (Dial)")
+        # Color scheme: dark brown/black background, yellow/gold accents
+        self.bg_color = "#1e1304"  # Dark brown/black (outer background)
+        self.folder_bg_color = "#2e1a08"  # Slightly lighter brown (folder interior)
+        self.accent_color = "#f6bc14"  # Gold/yellow
+        self.text_color = "#f6bc14"  # Gold/yellow text
+        self.border_color = "#f6bc14"  # Gold/yellow borders
+
         self.setGeometry(100, 100, 1200, 800)
-        self.setStyleSheet("background-color: white;")
+        
+        # Set monospace font
+        self.monospace_font = QFont("Courier", 12, QFont.Normal)
+        self.monospace_font.setStyleHint(QFont.Monospace)
 
         central_widget = QWidget()
-        central_widget.setStyleSheet("background-color: white;")
+        central_widget.setStyleSheet(f"background-color: {self.bg_color};")
         self.setCentralWidget(central_widget)
 
-        main_layout = QVBoxLayout(central_widget)
-        main_layout.setContentsMargins(0, 0, 0, 0)
-        main_layout.setSpacing(0)
+        outer_layout = QVBoxLayout(central_widget)
+        outer_layout.setContentsMargins(18, 18, 18, 18)
+        outer_layout.setSpacing(0)
+
+        folder_frame = FolderFrame(self.folder_bg_color, self.border_color, self.accent_color)
+        folder_layout = QVBoxLayout(folder_frame)
+        # Leave extra top padding so the tab/connector lines drawn by FolderFrame stay visible
+        folder_layout.setContentsMargins(26, 48, 26, 26)
+        folder_layout.setSpacing(14)
+
+        # Date label in tab area (positioned absolutely)
+        date_label = QLabel(datetime.datetime.now().strftime("%b %d %Y").upper(), folder_frame)
+        date_font = QFont(self.monospace_font)
+        date_font.setPointSize(13)
+        date_font.setBold(True)
+        date_label.setFont(date_font)
+        date_label.setStyleSheet(f"color: {self.text_color}; background: transparent;")
+        date_label.setAlignment(Qt.AlignCenter)
+        # Position centered within the tab area (tab_width=200)
+        # Manually using margin=8, tab width ~200
+        date_label.setGeometry(8, 8, 200, 30)
+        # No longer adding date_label to the layout since it's positioned manually
+
+        # Header with tab; wrap in a container with insets to match chatbox width and add vertical spacing
+        header_wrapper = QWidget()
+        header_wrapper.setStyleSheet("background: transparent;")
+        header_wrapper_layout = QHBoxLayout(header_wrapper)
+        # Left/Right margins (16) match chat_container, Top/Bottom (20/10) adds spacing
+        header_wrapper_layout.setContentsMargins(16, 25, 16, 5) 
+        header_wrapper_layout.setSpacing(0)
+
+        header_label = QLabel("CATALOGNET VECTOR SEARCH")
+        header_label.setFont(self.monospace_font)
+        header_label.setStyleSheet(f"""
+            background-color: {self.accent_color};
+            color: {self.bg_color};
+            padding: 8px 16px;
+            font-weight: bold;
+            border: 2px solid {self.border_color};
+        """)
+        header_label.setAlignment(Qt.AlignLeft | Qt.AlignVCenter)
+        header_wrapper_layout.addWidget(header_label)
+        folder_layout.addWidget(header_wrapper)
+
+        # Conversation area with border, inset to create even gap around the box
+        chat_container = QWidget()
+        chat_container.setStyleSheet("background: transparent;")
+        chat_container_layout = QVBoxLayout(chat_container)
+        chat_container_layout.setContentsMargins(16, 12, 16, 12)
+        chat_container_layout.setSpacing(0)
 
         self.chat_display = QTextEdit()
         self.chat_display.setReadOnly(True)
-        self.chat_display.setStyleSheet(
-            "padding: 10px; font-size: 13px; background-color: #fafafa; border: none; color: #222;"
-        )
-        main_layout.addWidget(self.chat_display)
+        self.chat_display.setFont(self.monospace_font)
+        self.chat_display.setStyleSheet(f"""
+            padding: 15px;
+            font-size: 13px;
+            background-color: {self.bg_color};
+            border: 2px solid {self.border_color};
+            color: {self.text_color};
+        """)
+        # Style the scrollbar to match the aesthetic
+        self.chat_display.verticalScrollBar().setStyleSheet(f"""
+            QScrollBar:vertical {{
+                background-color: {self.bg_color};
+                width: 12px;
+                border: 1px solid {self.border_color};
+            }}
+            QScrollBar::handle:vertical {{
+                background-color: {self.accent_color};
+                min-height: 20px;
+            }}
+            QScrollBar::handle:vertical:hover {{
+                background-color: #ffed4e;
+            }}
+        """)
+        # Set text color in palette
+        palette = self.chat_display.palette()
+        palette.setColor(QPalette.Text, QColor(self.text_color))
+        self.chat_display.setPalette(palette)
+        chat_container_layout.addWidget(self.chat_display)
+        folder_layout.addWidget(chat_container, stretch=1)
 
+        # Input area with input field and send button
+        input_layout = QHBoxLayout()
+        input_layout.setContentsMargins(16, 0, 16, 0)  # Match chat container inset
+        input_layout.setSpacing(10)
+        
         self.chat_input = QLineEdit()
-        self.chat_input.setPlaceholderText("Tell me what kind of book you want...")
-        self.chat_input.setStyleSheet(
-            """
-            QLineEdit {
+        self.chat_input.setPlaceholderText("ASK ABOUT ANYTHING")
+        self.chat_input.setFont(self.monospace_font)
+        self.chat_input.setStyleSheet(f"""
+            QLineEdit {{
                 padding: 10px;
-                font-size: 14px;
-                border: 1px solid #ddd;
-                border-radius: 4px;
-                background-color: white;
-                color: black;
-            }
-            QLineEdit:focus {
-                border: 1px solid #0066ff;
-            }
-        """
-        )
+                font-size: 13px;
+                border: 2px solid {self.border_color};
+                background-color: {self.bg_color};
+                color: {self.text_color};
+            }}
+            QLineEdit::placeholder {{
+                color: {self.text_color};
+                opacity: 0.6;
+            }}
+            QLineEdit:focus {{
+                border: 2px solid {self.accent_color};
+            }}
+        """)
+        # Set placeholder and text colors
+        input_palette = self.chat_input.palette()
+        input_palette.setColor(QPalette.Text, QColor(self.text_color))
+        input_palette.setColor(QPalette.PlaceholderText, QColor(self.text_color))
+        self.chat_input.setPalette(input_palette)
         self.chat_input.returnPressed.connect(self.on_chat_submit)
-        main_layout.addWidget(self.chat_input)
-        if self.chat_manager and self.chat_manager.is_available():
-            self.append_chat_line("Bot: Hi! Tell me what you're in the mood to read.")
-        else:
-            self.append_chat_line(
-                "Bot: Gemini chat isn't available. Check your API key to enable conversations."
-            )
+        input_layout.addWidget(self.chat_input, stretch=1)
 
+        self.send_button = QPushButton("SEND")
+        self.send_button.setFont(self.monospace_font)
+        self.send_button.setStyleSheet(f"""
+            QPushButton {{
+                background-color: {self.accent_color};
+                color: {self.bg_color};
+                padding: 10px 20px;
+                font-weight: bold;
+                border: 2px solid {self.border_color};
+            }}
+            QPushButton:hover {{
+                background-color: #ffed4e;
+            }}
+            QPushButton:pressed {{
+                background-color: #ccaa00;
+            }}
+        """)
+        self.send_button.clicked.connect(self.on_chat_submit)
+        input_layout.addWidget(self.send_button)
+        
+        folder_layout.addLayout(input_layout)
+
+        # Window label (hidden by default, shown only if dial is active)
         self.window_label = QLabel()
         self.window_label.setAlignment(Qt.AlignRight)
-        self.window_label.setStyleSheet("padding: 6px 12px; font-size: 12px; color: #555;")
+        self.window_label.setFont(self.monospace_font)
+        self.window_label.setStyleSheet(f"padding: 6px 12px; font-size: 11px; color: {self.text_color};")
+        self.window_label.setVisible(False)
         self.update_window_label()
-        main_layout.addWidget(self.window_label)
+        folder_layout.addWidget(self.window_label)
+
+        outer_layout.addWidget(folder_frame)
+
+        # Initial greeting
+        if self.chat_manager and self.chat_manager.is_available():
+            self.append_chat_line("Hello! I'm your CatalogNet library assistant. How can I help you discover your next great read today?")
+        else:
+            self.append_chat_line("Hello! I'm your CatalogNet library assistant. How can I help you discover your next great read today?")
+            self.append_chat_line("(Note: Gemini chat isn't available. Check your API key to enable conversations.)")
 
         if self.dial_reader:
             self.timer = QTimer(self)
             self.timer.timeout.connect(self.sync_dial_value)
             self.timer.start(150)
+            self.window_label.setVisible(True)
 
     def clear_glow_effects(self):
         self.previously_glowing = []
@@ -395,7 +589,7 @@ class BookGUI(QMainWindow):
     def append_chat_line(self, text):
         if not self.chat_display or not text:
             return
-        self.chat_display.append(text)
+        self.chat_display.append("CatalogNet: " + text)
         scrollbar = self.chat_display.verticalScrollBar()
         if scrollbar is not None:
             scrollbar.setValue(scrollbar.maximum())
@@ -407,15 +601,16 @@ class BookGUI(QMainWindow):
         if not user_message:
             return
         self.chat_input.clear()
-        self.append_chat_line(f"You: {user_message}")
+        # Display user message in the chat
+        self.append_chat_line("You: " + user_message)
 
         if not self.chat_manager or not self.chat_manager.is_available():
-            self.append_chat_line("Bot: Gemini chat isn't configured yet.")
+            self.append_chat_line("Gemini chat isn't configured yet.")
             return
 
         reply_text, search_query = self.chat_manager.send_message(user_message)
         if reply_text:
-            self.append_chat_line(f"Bot: {reply_text}")
+            self.append_chat_line(reply_text)
         if search_query:
             self.show_query_results(search_query)
 
@@ -447,6 +642,8 @@ class BookGUI(QMainWindow):
     def update_window_label(self):
         low, high = self.current_window_bounds()
         self.window_label.setText(f"Similarity window: {low:.2f} – {high:.2f}")
+        if self.dial_reader:
+            self.window_label.setVisible(True)
 
     def sync_dial_value(self):
         if not self.dial_reader:
