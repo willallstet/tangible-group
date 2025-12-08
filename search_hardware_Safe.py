@@ -47,6 +47,7 @@ LED_BAUDRATE = 9600
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
 LED_ON_COLOR = "#f6bc14"  # Match UI accent / Arduino default colour
+LED_IDLE_TIMEOUT = 15  # seconds before forcing lights off on inactivity
 CHAT_SYSTEM_PROMPT = (
     "You are a library assistant. You help people discover their next great read. "
     "Ask light follow-up questions when helpful, then propose recommendations. Keep the responses short, less than 40 words."
@@ -243,6 +244,7 @@ class LEDController:
         self.baudrate = baudrate
         self.device = None
         self.last_sent = set()
+        self.last_activity = time.time()
 
         if serial is None:
             print("LEDController: pyserial not installed; LEDs disabled.")
@@ -303,10 +305,29 @@ class LEDController:
                 print(f"LEDController write error (ON {pos}): {exc}")
 
         self.last_sent = new_set
+        self.last_activity = time.time()
         try:
             self.device.flush()
         except Exception as exc:
             print(f"LEDController flush error: {exc}")
+
+    def clear_if_stale(self, timeout_seconds=LED_IDLE_TIMEOUT):
+        """Turn off all LEDs if no updates have been sent for a while."""
+        if not self.device or not self.last_sent:
+            return
+        if time.time() - self.last_activity < timeout_seconds:
+            return
+        for pos in list(self.last_sent):
+            try:
+                print(f"LED TX: {pos},OFF (idle timeout)", flush=True)
+                self.device.write(f"{pos},OFF\n".encode("utf-8"))
+            except Exception as exc:
+                print(f"LEDController write error (idle OFF {pos}): {exc}")
+        self.last_sent = set()
+        try:
+            self.device.flush()
+        except Exception as exc:
+            print(f"LEDController flush error (idle clear): {exc}")
 
 
 def load_data(filename):
@@ -662,6 +683,11 @@ class BookGUI(QMainWindow):
             self.timer.timeout.connect(self.sync_dial_value)
             self.timer.start(150)
             self.window_label.setVisible(True)
+        # Idle LED timeout checker
+        if self.led_controller:
+            self.led_idle_timer = QTimer(self)
+            self.led_idle_timer.timeout.connect(self.check_led_inactivity)
+            self.led_idle_timer.start(1000)
         if self.shortlist:
             self.show_shortlist_in_chat()
 
@@ -763,7 +789,6 @@ class BookGUI(QMainWindow):
 
         self.shortlist = new_entries[:SHORTLIST_MAX_SIZE]
         self.persist_shortlist()
-        self.show_shortlist_in_chat()
 
     def show_shortlist_in_chat(self):
         if not self.shortlist:
@@ -793,9 +818,12 @@ class BookGUI(QMainWindow):
         for idx in indices:
             if 0 <= idx < len(self.books):
                 position = self.books[idx].get("Position")
-                if isinstance(position, int) and position not in seen:
-                    positions.append(position)
-                    seen.add(position)
+                # Accept both numeric and string identifiers (e.g., "A1")
+                if isinstance(position, (int, str)):
+                    pos_key = str(position).strip()
+                    if pos_key and pos_key not in seen:
+                        positions.append(pos_key)
+                        seen.add(pos_key)
         self.led_controller.send_positions(positions)
 
     def append_chat_line(self, text):
@@ -948,6 +976,11 @@ class BookGUI(QMainWindow):
             window=window,
         )
         self.add_glow_to_books(indices)
+
+    def check_led_inactivity(self):
+        """Force all LEDs off if no updates were sent recently."""
+        if self.led_controller:
+            self.led_controller.clear_if_stale(timeout_seconds=LED_IDLE_TIMEOUT)
 
 
 def main():

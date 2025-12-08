@@ -1,7 +1,7 @@
 #include <Adafruit_NeoPixel.h>
 
 #define PIXEL_PIN 3
-#define NUMPIXELS 13
+#define NUMPIXELS 34
 
 Adafruit_NeoPixel strip(NUMPIXELS, PIXEL_PIN, NEO_GRB + NEO_KHZ800);
 
@@ -32,6 +32,19 @@ BookSpace spaces[] = {
   { "A4", 9, {6}, 1, false },
   { "A5", 10, {8,9},    2, false },
   { "A6", 12, {11,12}, 2, false },
+
+  { "A7", 5, {14}, 1, false },
+  { "A8", 7, {16},    1, false },
+  { "A9", 8, {17}, 1, false },
+  { "A10", 9, {19}, 1, false },
+  { "A11", 10, {21,22},    2, false },
+  { "A12", 12, {23,24}, 2, false },
+
+  { "A13", 5, {25}, 1, false },
+  { "A14", 7, {27},    1, false },
+  { "A15", 8, {28,29}, 2, false },
+  { "A16", 9, {30,31}, 2, false },
+  { "A17", 10, {32,33},    2, false },
 
 
   
