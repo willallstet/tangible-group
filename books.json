@@ -5,7 +5,7 @@
       "Description": "In Cyberfeminism Index, hackers, scholars, artists, and activists of all regions, races and sexual orientations consider how humans might reconstruct themselves by way of technology. When learning about internet history, we are taught to focus on engineering, the military-industrial complex, and the grandfathers who created the architecture and protocol, but the internet is not only a network of cables, servers, and computers. It is an environment that shapes and is shaped by its inhabitants and their use. The creation and use of the Cyberfeminism Index is a social and political act. It takes the name cyberfeminism as an umbrella, complicates it, and pushes it into plain sight. Edited by designer, professor, and researcher Mindy Seu, it includes more than 700 short entries of radical techno-critical activism in a variety of media, including excerpts from academic articles and scholarly texts; descriptions of hackerspaces, digital rights activist groups, and bio-hacktivism; and depictions of feminist net art and new media art. Both a vital introduction for laypeople and a robust resource guide for educators, Cyberfeminism Index—an anti-canon, of sorts—celebrates the multiplicity of practices that fall under this imperfect categorization and makes visible cyberfeminism’s long-ignored origins and its expansive legacy.",
       "Year Published": 2023,
       "Image": "bookCovers/cyberFeminism.webp",
-      "Position": 0
+      "Position": "A0"
     },
     {
         "Title": "Diaries",
@@ -13,7 +13,7 @@
         "Description": "With a beautiful clean design befitting Eva Hesse’s aesthetic, this voluminous collection tracks the artist’s insights, doubts, process and personal life “Giving life to a once white piece of linen stretched on 4 pieces of wood, to create a rich visual experience is indeed an intriguing complete experience,” wrote Eva Hesse in a 1957 diary entry between notes on her weekly plans and further musings about her goals as an artist. In this extensive collection of Hesse’s diaries, recorded from 1955 to 1970, readers are given an intimate glimpse into the mind of one of contemporary sculpture’s most prominent figures. Despite personal tragedies and the difficulties she faced as one of the few female artists in the male-dominated postminimalist movement, Hesse remained intrepid in both her life and craft. Composed of twisted ropes and delicate plastic among other unconventional materials, Hesse’s sculptures defy traditional notions of form; her deeply thoughtful practice as a sculptor and a painter are revealed at length in her writing. Born to Jewish parents in 1936, American painter and sculptor Eva Hesse fled Nazi Germany with her older sister at the age of two and eventually reunited with her family in New York City a year later. In 1959 she received her BA from Yale University, and within a few years began creating the sculptures that would put her at the forefront of the postminimalist movement. Though her life was cut short in 1970, Hesse’s prolific output of artwork in her decade-long career has cemented her as a pioneer of contemporary sculpture.",
         "Year Published": 2020,
         "Image": "bookCovers/eva.jpg",
-        "Position": 1
+        "Position": "A1"
     },
     {
         "Title": "The New York Stories of Edith Wharton",
@@ -21,7 +21,7 @@
         "Description": "Edith Wharton wrote about New York as only a native can. Her Manhattan is a city of well-appointed drawing rooms, hansoms and broughams, all-night cotillions, and resplendent Fifth Avenue flats. Bishops’ nieces mingle with bachelor industrialists; respectable wives turn into excellent mistresses. All are governed by a code of behavior as rigid as it is precarious. What fascinates Wharton are the points of weakness in the structure of Old New York: the artists and writers at its fringes, the free-love advocates testing its limits, the widows and divorcées struggling to hold their own. The New York Stories of Edith Wharton gathers twenty stories of the city, written over the course of Wharton’s career. From her first published story, “Mrs. Manstey’s View,” to one of her last and most celebrated, “Roman Fever,” this new collection charts the growth of an American master and enriches our understanding of the central themes of her work, among them the meaning of marriage, the struggle for artistic integrity, the bonds between parent and child, and the plight of the aged. Illuminated by Roxana Robinson’s Introduction, these stories showcase Wharton’s astonishing insight into the turbulent inner lives of the men and women caught up in a rapidly changing society.",
         "Year Published": 2007,
         "Image": "bookCovers/wharton.jpg",
-        "Position": 2
+        "Position": "A2"
     },
     {
         "Title": "Supercommunity: Diabolical Togetherness Beyond Contemporary Art",
@@ -29,7 +29,7 @@
         "Description": "Leading artists, theorists, and writers exhume the dystopian and utopian futures contained within the present. “I am the supercommunity, and you are only starting to recognize me. I grew out of something that used to be humanity. Some have compared me to angry crowds in public squares; others compare me to wind and atmosphere, or to software.” Invited to exhibit at the 56th Venice Biennale, e-flux journal produced a single issue over a four-month span, publishing an article a day both online and on-site at Venice. In essays, poems, short stories, and plays, artists and theorists trace the negative collective that is the subject of contemporary life, in which art, the internet, and globalization have shed their utopian guises but persist as naked power, in the face of apocalyptic ecological disaster and against the claims of the social commons. “I convert care to cruelty, and cruelty back to care. I convert political desires to economic flows and data, and then I convert them back again. I convert revolutions to revelations. I don’t want security, I want to leave, and then disperse myself everywhere and all the time.”",
         "Year Published": 2017,
         "Image": "bookCovers/supercommunity.jpg",
-        "Position": 3
+        "Position": "A3"
     },
     {
         "Title": "Essays on Frege",
@@ -37,7 +37,7 @@
         "Description": "Although the importance of Gottlob Frege's work was acknowledged by such philosophers as Russell in The Principles of Mathematics, and by Russell and Whitehead in Principia Mathematica, his writings remained largely unkown to philosophers and mathematicians during his own lifetime (1848-1925). The last two decades, however, have witnessed a great revival of interest in Frege's thought, especially with the publication of translations by Geach and Black, J. L. Austin's translation of Frege's Grundlagen, and a partial translation by M. Furth of his Grundgesetze. The increasingly widespread translation and publication of Frege's writings has led to the appearance of numerious articles on various aspects of his thought. Mr. Klemke here assembles thirty-one such essays, two of which were written especially for inclusion in this volume. He groups these studies into three main categories on the basis of thematic emphasis: Frege's ontology, his semantics, and his logic and philosophy of mathematics. Included as appendices are new transltions of three important essays by Frege, previously inaccessible, but of signifigant value for the study of his thought. They are The Thought: A logical Inquriry, Compound Thoughts, and On the Foundations of Geometry. A comprehensive bibliography of works by and on Frege further enhances the text.",
         "Year Published": 1968,
         "Image": "bookCovers/frege.jpg",
-        "Position": 4
+        "Position": "A4"
     },
     {
         "Title": "A Man In Full",
@@ -45,7 +45,7 @@
         "Description": "The setting is Atlanta, Georgia—a racially mixed, late-twentieth-century boomtown full of fresh wealth and wily politicians. The protagonist is Charles Croker, once a college football star, now a late-middle-aged Atlanta conglomerate king whose outsize ego has at last hit up against reality. Charlie has a 29,000-acre quail-shooting plantation, a young and demanding second wife, and a half-empty office complex with a staggering load of debt. Meanwhile, Conrad Hensley, idealistic young father of two, is laid off from his job at the Croker Global Foods warehouse near Oakland, California, and finds himself spiraling into the lower depths of the American legal system. And back in Atlanta, when star Georgia Tech running back Fareek “the Canon” Fanon, a homegrown product of the city’s slums, is accused of date-raping the daughter of a pillar of the white establishment, upscale black lawyer Roger White II is asked to represent Fanon and help keep the city’s delicate racial balance from blowing sky-high. Networks of illegal Asian immigrants crisscrossing the continent, daily life behind bars, shady real estate syndicates—Wolfe shows us contemporary turn-of-the-century America with all the verve, wit, and insight that have made him one of our most admired talked-about novelists.",
         "Year Published": 2001,
         "Image": "bookCovers/wolfe.jpg",
-        "Position": 5
+        "Position": "A5"
     },
     {
         "Title": "Choreomata",
@@ -53,6 +53,6 @@
         "Description": "Is artificial intelligence (AI) becoming more and more expressive, or is human thought adopting more and more structures from computation? What does it mean to perform oneself through AI, or to construct one’s subjectivity through AI? How does AI continue to complicate what it means to have a body? Has the golden age of AI, especially with regards to creative applications, already ended? Choreomata: Performance and Performativity after AI is a book about performance and performativity, but more specifically, it is a book about the performance of artificiality and the performance of intelligence. Both humans and human-designed computational forces are thoroughly engaged in an entangled, mutual performance of AI. Choreomata spins up a latticework of interdisciplinary thought, pairing theoretical inquiry from philosophy, information theory, and computer science with practical case studies from visual art, dance, music, and social theory. Through cross-disciplinary proportions and a diverse roster of contributors, this book contains insights for computer scientists, social scientists, industry professionals, artists, and beyond.",
         "Year Published": 2024,
         "Image": "bookCovers/choreomata.jpg",
-        "Position": 6
+        "Position": "A6"
     }
 ]
