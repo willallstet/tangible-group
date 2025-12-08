@@ -117,5 +117,89 @@
         "Description": "Set in Atlanta, Georgia, during the late 20th-century economic boom, A Man in Full is a sprawling social novel that dissects the collisions of race, class, and status. The story centers on Charlie Croker, an aging real estate mogul and former football star facing bankruptcy, and Conrad Hensley, a young man crushed by the legal system. As their disparate worlds converge, Wolfe uses his trademark satirical wit to explore the stoic philosophy, the hollow nature of material wealth, and the precariousness of American masculinity.",
         "Year Published": 1998,
         "Position": "A17"
+    },
+    {
+        "Title": "Social Postmodernism: Beyond Identity Politics",
+        "Author": "Linda Nicholson, Steven Seidman",
+        "Description": "Social Postmodernism: Beyond Identity Politics addresses the contention between social theory and postmodernism. The editors, Linda Nicholson and Steven Seidman, gather essays that seek to bridge the gap between the political focus of social movements and the deconstructive nature of postmodern theory. The collection argues that postmodernism can be socially and politically relevant without abandoning its critique of grand narratives, offering a path forward that integrates critical theory with concrete political action and social justice.",
+        "Year Published": 1995,
+        "Position": "B1"
+    },
+    {
+        "Title": "Infinite Detail",
+        "Author": "Tim Maughan",
+        "Description": "In Infinite Detail, Tim Maughan presents a near-future sci-fi vision where the internet has been permanently disabled by a coordinated cyberattack. The story oscillates between the 'Before,' centered on a digital privacy activist group in Bristol's Croft neighborhood, and the 'After,' where the same neighborhood has become an off-grid agrarian enclave struggling to survive in a disconnected world. Maughan explores the fragility of our digital infrastructure, the surveillance state, and the meaning of community when the global network goes dark.",
+        "Year Published": 2019,
+        "Position": "B2"
+    },
+    {
+        "Title": "Pure Colour",
+        "Author": "Sheila Heti",
+        "Description": "Pure Colour is a philosophical novel that reimagines the act of creation. Sheila Heti posits that the current world is merely a 'first draft' by God, who has stepped back to critique it before creating a second, better draft. The protagonist, Mira, navigates love, grief, and art within this flawed draft, eventually transforming into a leaf on a tree alongside the spirit of her father. The book is a surreal and lyrical meditation on the nature of criticism, the purpose of art, and the enduring power of love amidst the ephemeral nature of existence.",
+        "Year Published": 2022,
+        "Position": "B3"
+    },
+    {
+        "Title": "How to Write an Autobiographical Novel",
+        "Author": "Alexander Chee",
+        "Description": "How to Write an Autobiographical Novel is a collection of essays by Alexander Chee that blurs the line between memoir and writing manual. Chee recounts his experiences as a student of Annie Dillard, an AIDS activist in San Francisco, a tarot reader, and a catering waiter for William F. Buckley Jr. Through these diverse experiences, he explores how life feeds into art and how the act of writing constructs the self. The book is an intimate examination of identity, queer history, and the struggle to find one's voice.",
+        "Year Published": 2018,
+        "Position": "B4"
+    },
+    {
+        "Title": "Just Kids",
+        "Author": "Patti Smith",
+        "Description": "Just Kids is Patti Smith's evocative memoir of her relationship with photographer Robert Mapplethorpe. Set against the backdrop of New York City in the late 1960s and 70s, the book chronicles their journey from struggling young artists living in the Chelsea Hotel to becoming icons of the punk rock and art scenes. Smith writes with poetic clarity about their deep, spiritual bond, their mutual encouragement to create, and the vibrant, gritty atmosphere of a city on the verge of cultural revolution.",
+        "Year Published": 2010,
+        "Position": "B5"
+    },
+    {
+        "Title": "Against Interpretation and Other Essays",
+        "Author": "Susan Sontag",
+        "Description": "Against Interpretation is a seminal collection of essays by Susan Sontag that challenged the dominant critical trends of the 1960s. In the title essay, Sontag argues that the modern obsession with interpreting the 'meaning' of art impoverishes the sensory experience of the work itself, famously stating, 'In place of a hermeneutics we need an erotics of art.' The collection also includes the influential 'Notes on Camp,' which codified the concept of camp sensibility, as well as essays on Sartre, Camus, and Godard, establishing Sontag as a major voice in cultural criticism.",
+        "Year Published": 1966,
+        "Position": "B6"
+    },
+    {
+        "Title": "Cheap Land Colorado: Off-Gridders at America's Edge",
+        "Author": "Ted Conover",
+        "Description": "In Cheap Land Colorado, veteran journalist Ted Conover immerses himself in the San Luis Valley, a rural expanse of 'failed subdivisions' where land is cheap and regulations are scarce. Living in a trailer among off-gridders, veterans, and survivalists, Conover documents a community on the fringe of society, exploring themes of independence, poverty, and the harsh reality of the American West's modern frontier.",
+        "Year Published": 2022,
+        "Position": "B7"
+    },
+    {
+        "Title": "The Poetics",
+        "Author": "Matthew Connors, Lucy Ives",
+        "Description": "The Poetics is a collaborative hybrid work by photographer Matthew Connors and writer Lucy Ives. The project involves the meticulous cataloging of every object found within Connors’s 1992 Volvo 240 station wagon. Through Connors' forensic photography and Ives' accompanying lyric essay, the book serves as a meditation on the narrative potential of objects, the archive, and the auto-fictional nature of memory.",
+        "Year Published": 2019,
+        "Position": "B8"
+    },
+    {
+        "Title": "Becoming Virtual: Reality in the Digital Age",
+        "Author": "Pierre Lévy",
+        "Description": "In Becoming Virtual: Reality in the Digital Age, philosopher Pierre Lévy argues that 'virtualization' is not a withdrawal from reality but a transformation of it. He explores how digital technologies deterritorialize information, the body, and the economy, creating new forms of collective intelligence. Lévy distinguishes the 'virtual' from the 'possible,' framing it as a dynamic force of creation that fundamentally alters our relationship to time, space, and community.",
+        "Year Published": 1998,
+        "Position": "B9"
+    },
+    {
+        "Title": "Time and the Digital: Connecting Technology, Aesthetics, and a Process Philosophy of Time",
+        "Author": "Timothy Scott Barker",
+        "Description": "In Time and the Digital, Timothy Scott Barker challenges the traditional focus on spatial relationships in digital art, arguing instead for a new focus on temporality. Drawing on the process philosophy of A.N. Whitehead and Gilles Deleuze, Barker explores how digital technologies create 'multi-temporal' experiences—where the time of the user, the network, and the software overlap. He contends that understanding the digital requires a philosophy that accounts for the fluid, non-linear, and complex nature of time in the digital age.",
+        "Year Published": 2012,
+        "Position": "B10"
+    },
+    {
+        "Title": "Kudos",
+        "Author": "Rachel Cusk",
+        "Description": "Kudos is the final installment in Rachel Cusk’s acclaimed 'Outline' trilogy. The novel follows the narrator, Faye, as she travels to a literary festival in Europe. Consistent with the previous books, the narrative is driven almost entirely by the conversations Faye has with the people she meets—publishers, fellow authors, and journalists. Through these dialogues, Cusk dissects themes of marriage, divorce, the literary world, and the societal expectations placed on women, all while maintaining a cool, detached, yet deeply observant narrative voice.",
+        "Year Published": 2018,
+        "Position": "B11"
+    },
+    {
+        "Title": "Count Zero",
+        "Author": "William Gibson",
+        "Description": "Count Zero is the second novel in William Gibson’s seminal Sprawl trilogy, following Neuromancer. Set seven years after the first book, it weaves together three plotlines: a corporate mercenary helping a scientist defect, an art dealer searching for the creator of mysterious robotic boxes, and a young hacker named Bobby Newmark (handle: 'Count Zero') who stumbles into a dark conspiracy in the matrix. The novel expands the cyberpunk universe, introducing the concept that the matrix has become inhabited by rogue AIs that manifest as Voodoo deities.",
+        "Year Published": 1986,
+        "Position": "B12"
     }
 ]

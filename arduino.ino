@@ -183,7 +183,7 @@ void loop() {
 
       Serial.print(spaces[i].id);
       Serial.print(", ");
-      Serial.println(pressed ? "PRESSED" : "RELEASED");
+      Serial.println(pressed ? "RELEASED" : "PRESSED");
     }
   }
 }

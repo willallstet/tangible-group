@@ -47,7 +47,6 @@ LED_BAUDRATE = 9600
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
 LED_ON_COLOR = "#f6bc14"  # Match UI accent / Arduino default colour
-LED_IDLE_TIMEOUT = 15  # seconds before forcing lights off on inactivity
 CHAT_SYSTEM_PROMPT = (
     "You are a library assistant. You help people discover their next great read. "
     "Ask light follow-up questions when helpful, then propose recommendations. Keep the responses short, less than 40 words."
@@ -59,6 +58,13 @@ SHORTLIST_FILE_CANDIDATES = [
     Path(os.environ.get("SELECTED_BOOK_FILE", "/selected_book.txt")),
     Path(__file__).resolve().parent / "selectedBook.txt",
 ]
+# Global lookup caches for book metadata and embeddings
+BOOK_INDEX_BY_POSITION = {}
+BOOKS_DATA = []
+BOOK_EMBEDDINGS = []
+LED_CONTROLLER = None
+# Position -> book lookup for quick reverse mapping (e.g., "A1" -> book info)
+BOOK_INDEX_BY_POSITION = {}
 
 _description_model = None
 
@@ -148,6 +154,8 @@ class DialReader(threading.Thread):
         self.baudrate = baudrate
         self.value = 0.5
         self.ser = None  # ADD THIS LINE
+        self.next_press_time = 0.0  # debounce window for press events
+        self.next_release_time = 0.0  # debounce window for release events
 
     def run(self):
         if serial is None or not self.port:
@@ -164,6 +172,57 @@ class DialReader(threading.Thread):
                 line = self.ser.readline().strip()
                 if not line:
                     continue
+                # Log every incoming serial payload for visibility
+                try:
+                    print(f"DialReader RX raw: {line!r}", flush=True)
+                except Exception:
+                    pass
+
+                # If this is a release event, log the corresponding book and skip numeric parsing
+                text_line = None
+                if isinstance(line, bytes):
+                    try:
+                        text_line = line.decode("utf-8", "ignore")
+                    except Exception:
+                        text_line = None
+                else:
+                    text_line = str(line)
+
+                # Turn off all LEDs on RELEASED events
+                if text_line and "RELEASED" in text_line.upper():
+                    now = time.time()
+                    if now < self.next_release_time:
+                        try:
+                            remaining = self.next_release_time - now
+                            print(f"DialReader RELEASED ignored (debounce {remaining:.2f}s remaining)", flush=True)
+                        except Exception:
+                            pass
+                        continue
+                    self.next_release_time = now + 3.0
+                    if LED_CONTROLLER:
+                        try:
+                            LED_CONTROLLER.send_positions([])
+                            print("DialReader RELEASED: turning all LEDs off", flush=True)
+                        except Exception as exc:
+                            print(f"DialReader RELEASED: LED off error: {exc}", flush=True)
+                    else:
+                        print("DialReader RELEASED: LED controller unavailable; cannot turn off", flush=True)
+                    continue
+
+                if text_line and "PRESSED" in text_line.upper():
+                    now = time.time()
+                    if now < self.next_press_time:
+                        try:
+                            remaining = self.next_press_time - now
+                            print(f"DialReader PRESSED ignored (debounce {remaining:.2f}s remaining)", flush=True)
+                        except Exception:
+                            pass
+                        continue
+                    self.next_press_time = now + 3.0
+                    position = text_line.split(",", 1)[0].strip()
+                    log_release_position(position)
+                    continue
+
                 try:
                     raw = float(line)
                 except ValueError:
@@ -244,7 +303,6 @@ class LEDController:
         self.baudrate = baudrate
         self.device = None
         self.last_sent = set()
-        self.last_activity = time.time()
 
         if serial is None:
             print("LEDController: pyserial not installed; LEDs disabled.")
@@ -305,35 +363,84 @@ class LEDController:
                 print(f"LEDController write error (ON {pos}): {exc}")
 
         self.last_sent = new_set
-        self.last_activity = time.time()
         try:
             self.device.flush()
         except Exception as exc:
             print(f"LEDController flush error: {exc}")
-
-    def clear_if_stale(self, timeout_seconds=LED_IDLE_TIMEOUT):
-        """Turn off all LEDs if no updates have been sent for a while."""
-        if not self.device or not self.last_sent:
-            return
-        if time.time() - self.last_activity < timeout_seconds:
-            return
-        for pos in list(self.last_sent):
-            try:
-                print(f"LED TX: {pos},OFF (idle timeout)", flush=True)
-                self.device.write(f"{pos},OFF\n".encode("utf-8"))
-            except Exception as exc:
-                print(f"LEDController write error (idle OFF {pos}): {exc}")
-        self.last_sent = set()
-        try:
-            self.device.flush()
-        except Exception as exc:
-            print(f"LEDController flush error (idle clear): {exc}")
 
 
 def load_data(filename):
     import codecs
     with codecs.open(filename, "r", encoding="utf-8", errors='replace') as f:
         return json.load(f)
+
+
+def build_book_index(books):
+    """Populate global position lookup (position -> book index)."""
+    BOOK_INDEX_BY_POSITION.clear()
+    for idx, book in enumerate(books or []):
+        pos = str(book.get("Position", "")).strip()
+        if pos:
+            BOOK_INDEX_BY_POSITION[pos.upper()] = idx
+
+
+def log_release_position(position):
+    """Log the book title/author that matches a PRESSED/RELEASED serial event and similar titles."""
+    pos_key = (position or "").strip()
+    if not pos_key:
+        print("DialReader RELEASED with empty position", flush=True)
+        return
+    idx = BOOK_INDEX_BY_POSITION.get(pos_key.upper())
+    if idx is None:
+        print(f"DialReader RELEASED at {pos_key}: no matching book in books.json", flush=True)
+        return
+
+    if not BOOKS_DATA or idx < 0 or idx >= len(BOOKS_DATA):
+        print(f"DialReader RELEASED at {pos_key}: book index out of range", flush=True)
+        return
+
+    book = BOOKS_DATA[idx]
+    title = book.get("Title", "Unknown")
+    author = book.get("Author", "Unknown")
+    print(f"DialReader RELEASED at {pos_key}: {title} by {author}", flush=True)
+
+    if not BOOK_EMBEDDINGS or idx >= len(BOOK_EMBEDDINGS):
+        print("DialReader RELEASED: embeddings not available; cannot fetch similars", flush=True)
+        return
+
+    similar_indices = [
+        i for i in get_top_similar_books(idx, BOOKS_DATA, BOOK_EMBEDDINGS, top_k=3)
+        if i != idx
+    ]
+    if not similar_indices:
+        print("DialReader RELEASED: no similar books found", flush=True)
+        return
+
+    similar_titles = []
+    for sim_idx in similar_indices:
+        if 0 <= sim_idx < len(BOOKS_DATA):
+            sim_book = BOOKS_DATA[sim_idx]
+            sim_title = sim_book.get("Title", "Unknown")
+            sim_author = sim_book.get("Author", "Unknown")
+            similar_titles.append(f"{sim_title} by {sim_author}")
+    if similar_titles:
+        print(f"DialReader RELEASED similars: {', '.join(similar_titles)}", flush=True)
+
+    # Light up the similar books using the LED controller
+    if LED_CONTROLLER:
+        positions = []
+        for sim_idx in similar_indices:
+            if sim_idx == idx:
+                continue  # never light up the pressed book itself
+            if 0 <= sim_idx < len(BOOKS_DATA):
+                pos_val = BOOKS_DATA[sim_idx].get("Position")
+                if pos_val is not None:
+                    pos_str = str(pos_val).strip()
+                    if pos_str:
+                        positions.append(pos_str)
+        LED_CONTROLLER.send_positions(positions)
+    else:
+        print("LED controller unavailable; skipping LED updates for similars", flush=True)
 
 
 def get_embedding(text):
@@ -683,11 +790,6 @@ class BookGUI(QMainWindow):
             self.timer.timeout.connect(self.sync_dial_value)
             self.timer.start(150)
             self.window_label.setVisible(True)
-        # Idle LED timeout checker
-        if self.led_controller:
-            self.led_idle_timer = QTimer(self)
-            self.led_idle_timer.timeout.connect(self.check_led_inactivity)
-            self.led_idle_timer.start(1000)
         if self.shortlist:
             self.show_shortlist_in_chat()
 
@@ -977,11 +1079,6 @@ class BookGUI(QMainWindow):
         )
         self.add_glow_to_books(indices)
 
-    def check_led_inactivity(self):
-        """Force all LEDs off if no updates were sent recently."""
-        if self.led_controller:
-            self.led_controller.clear_if_stale(timeout_seconds=LED_IDLE_TIMEOUT)
-
 
 def main():
     books = load_data(DATA_FILE)
@@ -989,10 +1086,18 @@ def main():
         print(f"Error: No books found in {DATA_FILE}")
         return
 
+    # Build position lookup for quick RELEASED event logging
+    build_book_index(books)
+
     book_embeddings = generate_embeddings_for_corpus(books)
     if not book_embeddings or len(book_embeddings) != len(books):
         print("Error: Failed to generate embeddings for all books.")
         return
+
+    # Cache globals for cross-thread access (e.g., serial event logging)
+    global BOOKS_DATA, BOOK_EMBEDDINGS
+    BOOKS_DATA = books
+    BOOK_EMBEDDINGS = book_embeddings
 
     dial_reader = None
     led_controller = None
@@ -1006,6 +1111,9 @@ def main():
         else:
             print("DialReader could not find a serial device; dial disabled.")
         led_controller = LEDController()
+        # Expose LED controller globally for serial event LED updates
+        global LED_CONTROLLER
+        LED_CONTROLLER = led_controller
 
     chat_manager = ChatManager()
 
