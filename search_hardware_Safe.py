@@ -14,9 +14,7 @@ from PyQt5.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QTextEdit,
-    QPushButton,
-    QScrollArea,
-    QGridLayout
+    QPushButton
 )
 from PyQt5.QtCore import Qt, QTimer
 from PyQt5.QtGui import (
@@ -25,8 +23,7 @@ from PyQt5.QtGui import (
     QPainter,
     QPainterPath,
     QColor,
-    QPen,
-    QPixmap
+    QPen
 )
 import datetime
 
@@ -45,15 +42,24 @@ except ImportError:
 DATA_FILE = "books.json"
 GEMINI_EMBED_MODEL = "models/text-embedding-004"
 DIAL_BAUDRATE = 115200
-LED_BAUDRATE = 115200
+# Arduino sketch uses 9600 baud by default; keep in sync here
+LED_BAUDRATE = 9600
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
+LED_ON_COLOR = "#f6bc14"  # Match UI accent / Arduino default colour
 CHAT_SYSTEM_PROMPT = (
     "You are a library assistant. You help people discover their next great read. "
-    "Ask light follow-up questions when helpful, then propose recommendations. "
+    "Ask light follow-up questions when helpful, then propose recommendations. Keep the responses short, less than 40 words."
     "After each reply include a line exactly like 'SEARCH_QUERY: <concise keywords>' "
     "describing what you will search for next. Use 'SEARCH_QUERY: NONE' only when no search should be run."
 )
+SHORTLIST_MAX_SIZE = 4
+SHORTLIST_FILE_CANDIDATES = [
+    Path(os.environ.get("SELECTED_BOOK_FILE", "/selected_book.txt")),
+    Path(__file__).resolve().parent / "selectedBook.txt",
+]
+
+_description_model = None
 
 
 def load_env_file(path=".env"):
@@ -77,6 +83,52 @@ elif genai is None:
     print("google-generativeai not installed; run `pip install google-generativeai`.")
 else:
     print("GEMINI_API_KEY missing; set it in your environment or .env file.")
+
+
+def _get_description_model():
+    """Lazy-init model for generating short poetic blurbs."""
+    global _description_model
+    if _description_model is False:
+        return None
+    if _description_model is not None:
+        return _description_model
+    if genai is None or not GEMINI_API_KEY:
+        _description_model = False
+        return None
+    try:
+        _description_model = genai.GenerativeModel(model_name=GEMINI_CHAT_MODEL)
+    except Exception as exc:
+        print(f"Description model init error: {exc}")
+        _description_model = False
+        return None
+    return _description_model
+
+
+def _trim_word_limit(text, limit=10):
+    words = text.split()
+    if len(words) <= limit:
+        return " ".join(words)
+    return " ".join(words[:limit])
+
+
+def generate_poetic_description(title, author):
+    """Return <=10-word poetic line for a book."""
+    model = _get_description_model()
+    if not model:
+        return "Description unavailable."
+    prompt = (
+        "Write one poetic sentence (10 words or fewer) describing the book "
+        f"'{title}' by {author}. Do not quote the title or author."
+    )
+    try:
+        response = model.generate_content(prompt)
+        raw = (response.text or "").strip().replace("\n", " ")
+    except Exception as exc:
+        print(f"Description generation error for {title}: {exc}")
+        return "Description unavailable."
+    if not raw:
+        return "Description unavailable."
+    return _trim_word_limit(raw, 10)
 
 
 def detect_serial_port():
@@ -190,6 +242,7 @@ class LEDController:
         self.port = port or os.environ.get("LED_SERIAL_PORT")
         self.baudrate = baudrate
         self.device = None
+        self.last_sent = set()
 
         if serial is None:
             print("LEDController: pyserial not installed; LEDs disabled.")
@@ -229,11 +282,31 @@ class LEDController:
     def send_positions(self, positions):
         if not self.device:
             return
-        payload = ",".join(str(pos) for pos in positions)
+        # Normalize and de-dup incoming positions
+        new_set = {str(pos).strip() for pos in positions if pos is not None and str(pos).strip()}
+
+        # Turn off positions that were previously lit but are no longer requested
+        to_turn_off = self.last_sent - new_set
+        for pos in to_turn_off:
+            try:
+                print(f"LED TX: {pos},OFF", flush=True)
+                self.device.write(f"{pos},OFF\n".encode("utf-8"))
+            except Exception as exc:
+                print(f"LEDController write error (OFF {pos}): {exc}")
+
+        # Turn on requested positions with the highlight colour
+        for pos in new_set:
+            try:
+                print(f"LED TX: {pos},ON,{LED_ON_COLOR}", flush=True)
+                self.device.write(f"{pos},ON,{LED_ON_COLOR}\n".encode("utf-8"))
+            except Exception as exc:
+                print(f"LEDController write error (ON {pos}): {exc}")
+
+        self.last_sent = new_set
         try:
-            self.device.write((payload + "\n").encode("utf-8"))
+            self.device.flush()
         except Exception as exc:
-            print(f"LEDController write error: {exc}")
+            print(f"LEDController flush error: {exc}")
 
 
 def load_data(filename):
@@ -379,13 +452,16 @@ class BookGUI(QMainWindow):
         self.chat_manager = chat_manager
         self.led_controller = led_controller
         self.previously_glowing = []
-        self.image_labels = []
         self.chat_display = None
         self.chat_input = None
         self.window_label = None
         self.send_button = None
         self.timer = None
         self.last_query = ""
+        self.shortlist_paths = self._build_shortlist_paths()
+        self.shortlist = []
+        self.short_desc_cache = {}
+        self.persist_shortlist()
 
         # Color scheme: dark brown/black background, yellow/gold accents
         self.bg_color = "#1e1304"  # Dark brown/black (outer background)
@@ -563,106 +639,6 @@ class BookGUI(QMainWindow):
         self.clear_button.clicked.connect(self.on_clear_search)
         input_layout.addWidget(self.clear_button)
 
-# [NEW] Add Book Grid
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)
-        scroll_area.setStyleSheet(f"""
-            QScrollArea {{
-                background-color: {self.folder_bg_color};
-                border: 2px solid {self.border_color};
-                margin: 16px;
-            }}
-            QScrollBar:vertical {{
-                background-color: {self.bg_color};
-                width: 12px;
-                border: 1px solid {self.border_color};
-            }}
-            QScrollBar::handle:vertical {{
-                background-color: {self.accent_color};
-                min-height: 20px;
-            }}
-        """)
-        
-        scroll_content = QWidget()
-        scroll_content.setStyleSheet(f"background-color: {self.folder_bg_color};")
-        grid_layout = QGridLayout(scroll_content)
-        grid_layout.setSpacing(15)
-        grid_layout.setContentsMargins(20, 20, 20, 20)
-        
-        cols = 4
-        image_size = 120
-        
-        for i, book in enumerate(self.books):
-            row = i // cols
-            col = i % cols
-            
-            container = QWidget()
-            container.setVisible(False)  # ADD THIS - hide by default
-            container_layout = QVBoxLayout(container)
-            container_layout.setContentsMargins(5, 5, 5, 5)
-            container_layout.setSpacing(5)
-            
-            
-            image_label = QLabel()
-            image_label.setFixedSize(image_size, image_size)
-            image_label.setAlignment(Qt.AlignCenter)
-            image_label.setCursor(Qt.PointingHandCursor)
-            image_label.setScaledContents(False)
-            image_label.setStyleSheet(f"""
-                background-color: {self.bg_color};
-                border: 2px solid {self.border_color};
-                padding: 5px;
-            """)
-            
-            # Load image
-            image_path = book.get('Image', '')
-            if image_path and os.path.exists(image_path):
-                pixmap = QPixmap(image_path)
-                scaled_pixmap = pixmap.scaled(
-                    image_size - 10, 
-                    image_size - 10, 
-                    Qt.KeepAspectRatio, 
-                    Qt.SmoothTransformation
-                )
-                image_label.setPixmap(scaled_pixmap)
-            else:
-                # Show title if no image
-                title_text = book.get('Title', 'Unknown')[:15]
-                image_label.setText(title_text)
-                image_label.setWordWrap(True)
-                image_label.setStyleSheet(f"""
-                    background-color: {self.bg_color};
-                    border: 2px solid {self.border_color};
-                    color: {self.text_color};
-                    padding: 10px;
-                    font-size: 10px;
-                """)
-            
-            # Click handler
-            def make_click_handler(idx):
-                return lambda event: self.on_book_click(idx)
-            image_label.mousePressEvent = make_click_handler(i)
-            
-            container_layout.addWidget(image_label)
-            
-            # Book title below image
-            title_label = QLabel(book.get('Title', 'Unknown')[:20])
-            title_label.setFont(self.monospace_font)
-            title_label.setStyleSheet(f"""
-                color: {self.text_color};
-                font-size: 9px;
-                background: transparent;
-            """)
-            title_label.setAlignment(Qt.AlignCenter)
-            title_label.setWordWrap(True)
-            container_layout.addWidget(title_label)
-            
-            grid_layout.addWidget(container, row, col, Qt.AlignCenter)
-            self.image_labels.append((image_label, container))  # CHANGE: store both label and container
-        
-        scroll_area.setWidget(scroll_content)
-        folder_layout.addWidget(scroll_area, stretch=1)
-
         # Window label (hidden by default, shown only if dial is active)
         self.window_label = QLabel()
         self.window_label.setAlignment(Qt.AlignRight)
@@ -686,56 +662,126 @@ class BookGUI(QMainWindow):
             self.timer.timeout.connect(self.sync_dial_value)
             self.timer.start(150)
             self.window_label.setVisible(True)
+        if self.shortlist:
+            self.show_shortlist_in_chat()
+
+    def _build_shortlist_paths(self):
+        paths = []
+        for candidate in SHORTLIST_FILE_CANDIDATES:
+            if candidate is None:
+                continue
+            path_obj = Path(candidate)
+            if path_obj not in paths:
+                paths.append(path_obj)
+        return paths
+
+    def load_shortlist(self):
+        """Load existing shortlist from disk if present."""
+        for path in self.shortlist_paths:
+            try:
+                if not path.exists():
+                    continue
+                lines = path.read_text(encoding="utf-8").splitlines()
+                parsed = []
+                for line in lines:
+                    if not line.strip():
+                        continue
+                    parts = [p.strip() for p in line.split(" | ", 2)]
+                    if len(parts) == 3:
+                        parsed.append({"title": parts[0], "author": parts[1], "description": parts[2]})
+                    elif len(parts) == 2:
+                        parsed.append({"title": parts[0], "author": parts[1], "description": ""})
+                    else:
+                        parsed.append({"title": line.strip(), "author": "", "description": ""})
+                if parsed:
+                    print(f"Loaded shortlist from {path}")
+                    return parsed[:SHORTLIST_MAX_SIZE]
+            except Exception as exc:
+                print(f"Could not load shortlist from {path}: {exc}")
+        return []
+
+    def persist_shortlist(self):
+        """Write shortlist to disk in all configured locations."""
+        lines = [self.format_shortlist_line(item) for item in self.shortlist[:SHORTLIST_MAX_SIZE]]
+        payload = "\n".join(lines)
+        for path in self.shortlist_paths:
+            try:
+                path.parent.mkdir(parents=True, exist_ok=True)
+                path.write_text(payload, encoding="utf-8")
+                print(f"Wrote shortlist to {path}")
+            except Exception as exc:
+                print(f"Error writing shortlist to {path}: {exc}")
+
+    @staticmethod
+    def format_shortlist_line(entry):
+        title = entry.get("title", "").strip()
+        author = entry.get("author", "").strip()
+        description = entry.get("description", "").strip().replace("\n", " ")
+        parts = [part for part in (title, author, description) if part]
+        return " | ".join(parts)
+
+    def get_poetic_description_cached(self, title, author):
+        key = (title, author)
+        if key in self.short_desc_cache:
+            return self.short_desc_cache[key]
+        desc = generate_poetic_description(title, author)
+        self.short_desc_cache[key] = desc
+        return desc
+
+    def update_shortlist(self, indices):
+        """Refresh shortlist based on provided book indices."""
+        if not indices:
+            return
+
+        new_entries = []
+        seen = set()
+
+        for idx in indices:
+            if len(new_entries) >= SHORTLIST_MAX_SIZE:
+                break
+            if idx < 0 or idx >= len(self.books):
+                continue
+            book = self.books[idx]
+            title = book.get("Title", "Unknown")
+            author = book.get("Author", "Unknown")
+            key = (title, author)
+            if key in seen:
+                continue
+            description = self.get_poetic_description_cached(title, author)
+            new_entries.append({"title": title, "author": author, "description": description})
+            seen.add(key)
+
+        # Keep prior shortlist entries if there is room and they were not re-added
+        for entry in self.shortlist:
+            if len(new_entries) >= SHORTLIST_MAX_SIZE:
+                break
+            key = (entry.get("title", ""), entry.get("author", ""))
+            if key in seen:
+                continue
+            new_entries.append(entry)
+            seen.add(key)
+
+        self.shortlist = new_entries[:SHORTLIST_MAX_SIZE]
+        self.persist_shortlist()
+        self.show_shortlist_in_chat()
+
+    def show_shortlist_in_chat(self):
+        if not self.shortlist:
+            return
+        snippets = [
+            f"{item.get('title', '')} - {item.get('author', '')} - {item.get('description', '')}"
+            for item in self.shortlist
+        ]
+        self.append_chat_line(f"Shortlist (max {SHORTLIST_MAX_SIZE}): {' | '.join(snippets)}")
 
     def clear_glow_effects(self):
-        """Clear all highlights and hide all books"""
+        """Clear all highlights and stop LED indications."""
         self.previously_glowing = []
-
-        for image_label, container in self.image_labels:
-            container.setVisible(False)
-            image_label.setStyleSheet(f"""
-                background-color: {self.bg_color};
-                border: 2px solid {self.border_color};
-                padding: 5px;
-            """)
         self.push_led_update([])
 
     def add_glow_to_books(self, indices):
-        """Show and highlight only the matching books"""
-
-        for image_label, container in self.image_labels:
-            container.setVisible(False)
-            image_label.setStyleSheet(f"""
-                background-color: {self.bg_color};
-                border: 2px solid {self.border_color};
-                padding: 5px;
-            """)
-        
-        # Show and highlight only matching books
-        if not indices:
-            self.push_led_update([])
-            return
-            
+        """Track matches and update LEDs without showing cover previews."""
         self.previously_glowing = indices
-        matching_books = []
-        
-        for idx in indices:
-            if 0 <= idx < len(self.books):
-                book = self.books[idx]
-                matching_books.append(f"{book.get('Title', 'Unknown')} by {book.get('Author', 'Unknown')}")
-                
-                if idx < len(self.image_labels):
-                    image_label, container = self.image_labels[idx]
-                    container.setVisible(True)
-                    image_label.setStyleSheet(f"""
-                        background-color: {self.accent_color};
-                        border: 3px solid {self.accent_color};
-                        padding: 5px;
-                    """)
-        
-        if matching_books:
-            print(f"Matching books: {', '.join(matching_books)}")
-        
         self.push_led_update(indices)
 
     def push_led_update(self, indices=None):
@@ -755,7 +801,13 @@ class BookGUI(QMainWindow):
     def append_chat_line(self, text):
         if not self.chat_display or not text:
             return
-        self.chat_display.append("CatalogNet: " + text)
+        line = "CatalogNet: " + text
+        # Mirror chat output to terminal for visibility during runs
+        try:
+            print(line, flush=True)
+        except Exception:
+            pass
+        self.chat_display.append(line)
         scrollbar = self.chat_display.verticalScrollBar()
         if scrollbar is not None:
             scrollbar.setValue(scrollbar.maximum())
@@ -789,10 +841,16 @@ class BookGUI(QMainWindow):
             query,
             self.books,
             self.book_embeddings,
-            top_k=3,
+            top_k=SHORTLIST_MAX_SIZE,
             window=self.current_window_bounds(),
         )
         self.add_glow_to_books(indices)
+        self.update_shortlist(indices)
+        if indices:
+            titles = [self.books[i].get('Title', 'Unknown') for i in indices]
+            print(f"Top matches: {', '.join(titles)}")
+        else:
+            self.append_chat_line("No matching books found.")
 
     def current_window_bounds(self):
         half = WINDOW_SIZE / 2
@@ -821,7 +879,7 @@ class BookGUI(QMainWindow):
         self.update_window_label()
         self.refresh_highlights()
  
- # [NEW] Click Book
+    # [NEW] Click Book
     def on_book_click(self, clicked_idx):
         """Handle clicking on a book cover"""
         if clicked_idx < 0 or clicked_idx >= len(self.books):
@@ -829,9 +887,9 @@ class BookGUI(QMainWindow):
         book = self.books[clicked_idx]
         title = book.get('Title', 'Unknown')
         author = book.get('Author', 'Unknown')
-        
-        self.append_chat_line(f"You selected: {title} by {author}")
-        
+        description = self.get_poetic_description_cached(title, author)
+        self.append_chat_line(f"Selected: {title} by {author} - {description}")
+                
         similar_indices = get_top_similar_books(
             clicked_idx,
             self.books,
@@ -841,35 +899,12 @@ class BookGUI(QMainWindow):
         )
         
         self.add_glow_to_books([clicked_idx])
+        self.update_shortlist([clicked_idx] + similar_indices)
         
         if similar_indices:
             similar_titles = [self.books[i].get('Title', 'Unknown') for i in similar_indices]
             self.append_chat_line(f"Similar books: {', '.join(similar_titles)}")
-        
-        try:
-            with open("D:/selected_book.txt", "a", encoding="utf-8") as f:
-                f.write(title + "\n")  
-                f.flush()
-            print(f"Added to file: {title}")
-        except Exception as e:
-            print(f"Error: {e}")
 
-
-    def refresh_highlights(self):
-        """Refresh which books are shown based on current dial value"""
-        if not self.last_query:
-            return
-        window = self.current_window_bounds()
-        self.clear_glow_effects()
-        indices = get_top_books_by_query(
-            self.last_query,
-            self.books,
-            self.book_embeddings,
-            top_k=3,
-            window=window,
-        )
-        self.add_glow_to_books(indices)
-        print(f"Refreshed highlights for window {window[0]:.2f}-{window[1]:.2f}")
 
     # [NEW] Book Similarity Indices
     def get_books_in_window(self):
@@ -882,23 +917,18 @@ class BookGUI(QMainWindow):
             self.last_query,
             self.books,
             self.book_embeddings,
-            top_k=3,
+            top_k=SHORTLIST_MAX_SIZE,
             window=window,
         )
         return indices
     
     # [NEW] Clear Search
     def on_clear_search(self):
-        """Clear the search and hide all book covers"""
+        """Clear the search and reset state."""
         if self.chat_input:
             self.chat_input.clear()
-        try:
-            with open("D:/selected_book.txt", "w", encoding="utf-8") as f:
-                f.write("")
-            print("Cleared selected_book.txt")
-        except Exception as e:
-            print(f"Error clearing file: {e}")
-        
+        self.shortlist = []
+        self.persist_shortlist()
         self.last_query = ""
         self.clear_glow_effects()
         self.append_chat_line("Search cleared. Ask me about books to see recommendations!")
@@ -914,7 +944,7 @@ class BookGUI(QMainWindow):
             self.last_query,
             self.books,
             self.book_embeddings,
-            top_k=3,
+            top_k=SHORTLIST_MAX_SIZE,
             window=window,
         )
         self.add_glow_to_books(indices)

@@ -45,6 +45,7 @@ DIAL_BAUDRATE = 115200
 LED_BAUDRATE = 115200
 WINDOW_SIZE = 0.25  # similarity window width
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
+LED_ON_COLOR = "#f6bc14"  # Gold accent for LED highlights
 CHAT_SYSTEM_PROMPT = (
     "You are a library assistant. You help people discover their next great read. "
     "Ask light follow-up questions when helpful, then propose recommendations. "
@@ -182,6 +183,7 @@ class LEDController:
         self.port = port or os.environ.get("LED_SERIAL_PORT")
         self.baudrate = baudrate
         self.device = None
+        self.last_sent = set()
 
         if serial is None:
             print("LEDController: pyserial not installed; LEDs disabled.")
@@ -219,11 +221,33 @@ class LEDController:
                     break
 
     def send_positions(self, positions):
+        print(f"LEDController send_positions: {positions}")
         if not self.device:
+            print("LEDController: no device")
             return
-        payload = ",".join(str(pos) for pos in positions)
+        # Normalize to strings for commands like "A1,ON,#FF0000"
+        new_set = {str(pos).strip() for pos in positions if pos is not None and str(pos).strip()}
+        print(f"LEDController new_set: {new_set}")
+        # Turn off any previously lit positions that are no longer requested
+        to_turn_off = self.last_sent - new_set
+        print(f"LEDController to_turn_off: {to_turn_off}")
+        for pos in to_turn_off:
+            try:
+                self.device.write(f"{pos},OFF\n".encode("utf-8"))
+                print(f"LEDController write (OFF {pos})")
+            except Exception as exc:
+                print(f"LEDController write error (OFF {pos}): {exc}")
+
+        # Turn on requested positions with highlight color
+        for pos in new_set:
+            try:
+                self.device.write(f"{pos},ON,{LED_ON_COLOR}\n".encode("utf-8"))
+            except Exception as exc:
+                print(f"LEDController write error (ON {pos}): {exc}")
+
+        self.last_sent = new_set
         try:
-            self.device.write((payload + "\n").encode("utf-8"))
+            self.device.flush()
         except Exception as exc:
             print(f"LEDController write error: {exc}")
 
@@ -581,9 +605,12 @@ class BookGUI(QMainWindow):
         for idx in indices:
             if 0 <= idx < len(self.books):
                 position = self.books[idx].get("Position")
-                if isinstance(position, int) and position not in seen:
-                    positions.append(position)
-                    seen.add(position)
+                if position is None:
+                    continue
+                key = str(position)
+                if key not in seen:
+                    positions.append(key)
+                    seen.add(key)
         self.led_controller.send_positions(positions)
 
     def append_chat_line(self, text):

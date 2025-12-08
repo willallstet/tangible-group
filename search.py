@@ -1,11 +1,9 @@
 import json
 import numpy as np
 import ollama
-import os
 from PyQt5.QtWidgets import (QApplication, QMainWindow, QWidget, QGridLayout, 
                              QLabel, QScrollArea, QLineEdit, QVBoxLayout)
 from PyQt5.QtCore import Qt
-from PyQt5.QtGui import QPixmap
 
 # Configuration
 DATA_FILE = 'books.json'
@@ -149,28 +147,20 @@ class BookGUI(QMainWindow):
         grid_layout.setContentsMargins(20, 20, 20, 20)
         
         cols = 4
-        image_size = 200
         
         for i, book in enumerate(books):
             row = i // cols
             col = i % cols
             
-            image_label = QLabel()
-            image_label.setFixedSize(image_size, image_size)
+            image_label = QLabel(f"{book.get('Title', 'Unknown')}\n{book.get('Author', '')}")
+            image_label.setFixedSize(200, 120)
             image_label.setAlignment(Qt.AlignCenter)
             image_label.setCursor(Qt.PointingHandCursor)
-            image_label.setScaledContents(False)
-            image_label.setStyleSheet("background-color: transparent;")
-            
-            image_path = book.get('Image', '')
-            if image_path and os.path.exists(image_path):
-                pixmap = QPixmap(image_path)
-                scaled_pixmap = pixmap.scaled(image_size, image_size, Qt.KeepAspectRatio, Qt.SmoothTransformation)
-                image_label.setPixmap(scaled_pixmap)
-            else:
-                image_label.setText("No Image")
-                image_label.setStyleSheet("border: 1px solid #ccc; color: #999; background-color: transparent;")
-            
+            image_label.setWordWrap(True)
+            image_label.setStyleSheet(
+                "border: 1px solid #ccc; color: #000; background-color: #f7f7f7; padding: 8px;"
+            )
+        
             def make_click_handler(idx):
                 return lambda event: self.on_image_click(idx)
             image_label.mousePressEvent = make_click_handler(i)
@@ -184,14 +174,18 @@ class BookGUI(QMainWindow):
     def clear_glow_effects(self):
         for idx in self.previously_glowing:
             if 0 <= idx < len(self.image_labels):
-                self.image_labels[idx].setStyleSheet("background-color: transparent;")
+                self.image_labels[idx].setStyleSheet(
+                    "border: 1px solid #ccc; color: #000; background-color: #f7f7f7; padding: 8px;"
+                )
         self.glow_effects = []
         self.previously_glowing = []
     
     def add_glow_to_books(self, indices):
         for idx in indices:
             if 0 <= idx < len(self.image_labels):
-                self.image_labels[idx].setStyleSheet("background-color: yellow;")
+                self.image_labels[idx].setStyleSheet(
+                    "border: 2px solid #ffcc00; background-color: #fff7cc; color: #000; padding: 8px;"
+                )
                 self.previously_glowing.append(idx)
     
     def on_image_click(self, clicked_idx):

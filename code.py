@@ -17,7 +17,7 @@ displayio.release_displays()
 
 spi = board.SPI()
 display_bus = FourWire(spi, command=board.RX, chip_select=board.TX)
-display = GC9A01A(display_bus, width=240, height=240)
+display = GC9A01A(display_bus, width=240, height=240, rotation=90)
 
 main_group = displayio.Group()
 display.root_group = main_group
@@ -61,11 +61,11 @@ for i in range(10):
 value_label = Label(terminalio.FONT, text="", color=0xf6bc14, anchor_point=(0.5, 0.0), anchored_position=(120, 150), scale=3)
 main_group.append(value_label)
 
-# "You Selected:" header
-header_label = Label(terminalio.FONT, text="YOUR SELECTIONS...", color=0xf6bc14, x=15, y=80, scale=1)
+# Header label (changes based on mode)
+header_label = Label(terminalio.FONT, text="An Adventure Awaits", color=0xf6bc14, anchor_point=(0.5, 0.0), anchored_position=(120, 60), scale=1)
 main_group.append(header_label)
 
-# Book label - centered
+# Book label - centered (shows call numbers or description)
 book_label = Label(terminalio.FONT, text="", color=0xFFFFFF, anchor_point=(0.5, 0.0), anchored_position=(120, 100), scale=1)
 main_group.append(book_label)
 
@@ -90,9 +90,12 @@ encoder = IncrementalEncoder(seesaw)
 dial_values = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1.0]
 current_index = 4
 
-# Dial and book browsing state
-dial_active = False
-browse_mode = False
+# State management
+MODE_LANDING = 0  # Landing page with all call numbers
+MODE_BOOK_VIEW = 1  # Individual book view
+MODE_TUNING = 2  # Tuning mode for recommendations
+
+current_mode = MODE_LANDING
 current_book_index = 0
 
 # Display Text
@@ -126,12 +129,59 @@ def center_text(label, text):
     label.x = x_pos
     label.text = text
 
-def display_single_book(book_title, index, total):
-    """Display a single book with navigation info"""
-    wrapped = wrap_text_to_fit(book_title, max_chars_per_line=28)
-    book_label.text = wrapped
-    nav_label.text = f"< {index + 1}/{total} >"
-    center_text(nav_label, f"< {index + 1}/{total} >")
+def display_landing_page(books, highlight_index):
+    """Display landing page with scrollable call numbers"""
+    header_label.text = "An Adventure Awaits"
+    
+    # Show 5 books at a time, centered around highlighted book
+    start_idx = max(0, highlight_index - 2)
+    end_idx = min(len(books), start_idx + 5)
+    start_idx = max(0, end_idx - 5)
+    
+    books_to_show = books[start_idx:end_idx]
+    display_lines = []
+    
+    for i, book in enumerate(books_to_show):
+        actual_idx = start_idx + i
+        if actual_idx == highlight_index:
+            display_lines.append(f"> {book} <")
+        else:
+            display_lines.append(f"  {book}")
+    
+    book_label.text = "\n".join(display_lines)
+    center_text(status_label, f"{len(books)} books")
+    status_label.color = 0xFFFFFF
+    nav_label.text = ""
+    value_label.text = ""
+
+def display_book_view(call_number):
+    """Display individual book view with description"""
+    header_label.text = call_number
+    book_label.text = wrap_text_to_fit("Here is a description of the book, I hope you like it", max_chars_per_line=28)
+    center_text(status_label, "Click for more")
+    status_label.color = 0x80BFD9
+    nav_label.text = ""
+    value_label.text = ""
+
+def display_tuning_mode(call_number, dial_value):
+    """Display tuning mode for recommendations"""
+    header_label.text = "Other Book Suggestions"
+    book_label.text = ""
+    
+    mode_text = get_search_mode(dial_value)
+    value_label.text = mode_text
+    
+    center_text(status_label, "Tuning Mode")
+    status_label.color = 0xFFFFFF
+    nav_label.text = ""
+    
+    # Update indicators
+    active_count = int((dial_value / 1.0) * 10)
+    for i, (indicator, palette) in enumerate(dial_indicators):
+        if i < active_count:
+            palette[1] = 0xf6bc14
+        else:
+            palette[1] = 0x450000
 
 def get_search_mode(dial_value):
     """Convert dial value to search mode text"""
@@ -141,84 +191,80 @@ def get_search_mode(dial_value):
         return "BROAD"
     else:
         return "SPECIFIC"
+
+def alphabetical_call_number(book_title):
+    """Generate call number based on author's last name (like library cataloging)"""
+    if " by " in book_title.lower():
+        parts = book_title.split(" by ")
+        author = parts[1].strip() if len(parts) > 1 else book_title
+    else:
+        author = book_title.split()[0] if book_title.split() else book_title
+    
+    words = author.split()
+    last_name = words[-1] if words else author
+    
+    first_char = last_name[0].upper() if last_name else 'A'
+    main_num = int((ord(first_char) - ord('A')) / 26 * 1000)
+    sub_num = sum(ord(c.upper()) for c in last_name[:3]) % 1000
+
+    return f"{main_num:03d}.{sub_num:03d}"
+
+def clear_dial_indicators():
+    """Clear all dial indicators"""
+    for i, (indicator, palette) in enumerate(dial_indicators):
+        palette[1] = 0x450000
     
 last_book = ""
 last_file_content = ""
 displayed_books = []
 all_books = []
 
-# Button Press - Toggle modes
+# Main loop
 while True:
     button.update()
     
     if button.pressed:
         if not all_books:
-            # No books loaded, do nothing
             center_text(status_label, "No books yet")
             status_label.color = 0xFFFF00
-        elif not browse_mode:
-            # Enter browse mode from list view
-            browse_mode = True
-            current_book_index = 0
-            display_single_book(all_books[current_book_index], current_book_index, len(all_books))
-            center_text(status_label, "Browse Books")
-            status_label.color = 0x80BFD9
-        elif browse_mode and not dial_active:
-            # Click into book - activate dial for this book
-            dial_active = True
-            mode_text = get_search_mode(dial_values[current_index])
-            value_label.text = mode_text
-            center_text(status_label, "Tuning Mode")
-            status_label.color = 0xFFFFFF
+        elif current_mode == MODE_LANDING:
+            # Enter book view
+            current_mode = MODE_BOOK_VIEW
+            display_book_view(all_books[current_book_index])
+            
+        elif current_mode == MODE_BOOK_VIEW:
+            # Enter tuning mode
+            current_mode = MODE_TUNING
+            display_tuning_mode(all_books[current_book_index], dial_values[current_index])
             
             # Print initial dial value to serial
             print(dial_values[current_index])
+            print(f"Book: {all_books[current_book_index]} | Mode: {get_search_mode(dial_values[current_index])} ({dial_values[current_index]})")
             
-            print(f"Book: {all_books[current_book_index]} | Mode: {mode_text} ({dial_values[current_index]})")
-            
-            active_count = int((dial_values[current_index] / 1.0) * 10)
-            for i, (indicator, palette) in enumerate(dial_indicators):
-                if i < active_count:
-                    palette[1] = 0xf6bc14
-                else:
-                    palette[1] = 0x450000
-        elif dial_active:
-            # Exit dial tuning mode back to browse mode
-            dial_active = False
+        elif current_mode == MODE_TUNING:
+            # Exit back to landing page
+            current_mode = MODE_LANDING
+            clear_dial_indicators()
             value_label.text = ""
-            # Clear indicators
-            for i, (indicator, palette) in enumerate(dial_indicators):
-                palette[1] = 0x450000
-            
-            display_single_book(all_books[current_book_index], current_book_index, len(all_books))
-            center_text(status_label, "Browse Books")
-            status_label.color = 0x80BFD9
+            display_landing_page(all_books, current_book_index)
 
     # Handle encoder rotation
     position = encoder.position
     if position != 0:
-        if browse_mode and not dial_active:
-            # Book browsing mode - scroll through books
+        if current_mode == MODE_LANDING:
+            # Scroll through call numbers on landing page
             current_book_index += position
             current_book_index = max(0, min(len(all_books) - 1, current_book_index))
-            display_single_book(all_books[current_book_index], current_book_index, len(all_books))
+            display_landing_page(all_books, current_book_index)
         
-        elif dial_active:
-            # Dial tuning mode - adjust dial value
+        elif current_mode == MODE_TUNING:
+            # Adjust dial value in tuning mode
             current_index += position
             current_index = max(0, min(len(dial_values) - 1, current_index))
             
-            mode_text = get_search_mode(dial_values[current_index])
-            value_label.text = mode_text 
+            display_tuning_mode(all_books[current_book_index], dial_values[current_index])
             
-            active_count = int((dial_values[current_index] / 1.0) * 10)
-            for i, (indicator, palette) in enumerate(dial_indicators):
-                if i < active_count:
-                    palette[1] = 0xf6bc14
-                else:
-                    palette[1] = 0x450000
-            
-            # Print the dial value to serial for DialReader
+            # Print the dial value to serial
             print(dial_values[current_index])
             
             # Write dial value to file
@@ -229,7 +275,7 @@ while True:
             except Exception as e:
                 print(f"Error writing dial: {e}")
             
-            print(f"Book: {all_books[current_book_index]} | Mode: {mode_text} ({dial_values[current_index]})")
+            print(f"Book: {all_books[current_book_index]} | Mode: {get_search_mode(dial_values[current_index])} ({dial_values[current_index]})")
         
         encoder.position = 0
     
@@ -237,36 +283,41 @@ while True:
     try:
         with open("/selected_book.txt", "r") as f:
             file_content = f.read().strip()
-            
-            if file_content:
-                all_books = [book.strip() for book in file_content.split("\n") if book.strip()]
+        
+        if file_content:
+            raw_books = []
+            for line in file_content.split("\n"):
+                if not line.strip():
+                    continue
+                parts = [p.strip() for p in line.split("|", 1)]
+                title = parts[0] if parts else ""
+                if title:
+                    raw_books.append(title)
+            all_books = [alphabetical_call_number(book) for book in raw_books]
+
+            if all_books != displayed_books:
+                displayed_books = all_books
                 
-                if all_books != displayed_books:
-                    displayed_books = all_books
-                    
-                    # Show list view when not browsing
-                    if not browse_mode and not dial_active:
-                        books_to_show = all_books[-5:] if len(all_books) > 5 else all_books
-                        display_text = "\n".join(books_to_show)
-                        
-                        wrapped_text = wrap_text_to_fit(display_text, max_chars_per_line=28)
-                        book_label.text = wrapped_text
-                        center_text(status_label, f"{len(all_books)} books")
-                        status_label.color = 0xFFFFFF
-                        print(f"DISPLAY: Showing {len(books_to_show)} of {len(all_books)} books")
-            else:
-                all_books = []
-                displayed_books = []
-                browse_mode = False
-                dial_active = False
-                nav_label.text = ""
-                value_label.text = ""
-                    
+                # Update display if in landing mode
+                if current_mode == MODE_LANDING:
+                    display_landing_page(all_books, current_book_index)
+                    print(f"DISPLAY: Showing {len(all_books)} books")
+        else:
+            all_books = []
+            displayed_books = []
+            current_mode = MODE_LANDING
+            header_label.text = "An Adventure Awaits"
+            book_label.text = ""
+            nav_label.text = ""
+            value_label.text = ""
+              
     except OSError:
         all_books = []
         displayed_books = []
-        browse_mode = False
-        dial_active = False
+        current_mode = MODE_LANDING
+        clear_dial_indicators()
+        header_label.text = "An Adventure Awaits"
+        book_label.text = ""
         nav_label.text = ""
         value_label.text = ""
         if status_label.text != "No file":
