@@ -47,7 +47,8 @@ DIAL_BAUDRATE = 115200
 LED_BAUDRATE = 9600
 WINDOW_SIZE = 0.25  # similarity window width (legacy; bucketed mode ignores this)
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
-LED_ON_COLOR = "#f6bc14"  # Match UI accent / Arduino default colour
+LED_ON_COLOR_SEARCH = "#f6bc14"  # Default search highlight (gold)
+LED_ON_COLOR_SWITCH = "#9ad3fc"  # Light blue for switch-driven highlights
 CHAT_SYSTEM_PROMPT = (
     "You are a library assistant. You help people discover their next great read. "
     "Ask light follow-up questions when helpful, then propose recommendations. Keep the responses short, less than 40 words."
@@ -344,9 +345,10 @@ class LEDController:
                         print(f"LEDController could not open {attempt_port}: {exc}")
                     break
 
-    def send_positions(self, positions):
+    def send_positions(self, positions, color=None):
         if not self.device:
             return
+        color = color or LED_ON_COLOR_SEARCH
         # Normalize and de-dup incoming positions
         new_set = {str(pos).strip() for pos in positions if pos is not None and str(pos).strip()}
 
@@ -362,8 +364,8 @@ class LEDController:
         # Turn on requested positions with the highlight colour
         for pos in new_set:
             try:
-                print(f"LED TX: {pos},ON,{LED_ON_COLOR}", flush=True)
-                self.device.write(f"{pos},ON,{LED_ON_COLOR}\n".encode("utf-8"))
+                print(f"LED TX: {pos},ON,{color}", flush=True)
+                self.device.write(f"{pos},ON,{color}\n".encode("utf-8"))
             except Exception as exc:
                 print(f"LEDController write error (ON {pos}): {exc}")
 
@@ -381,15 +383,15 @@ class DualLEDController:
         self.upper = upper
         self.lower = lower
 
-    def send_positions(self, positions):
+    def send_positions(self, positions, color=None):
         # Normalize first
         normalized = {str(pos).strip() for pos in positions if pos is not None and str(pos).strip()}
         # If no positions, turn everything off on both controllers
         if not normalized:
             if self.upper:
-                self.upper.send_positions([])
+                self.upper.send_positions([], color=color)
             if self.lower:
-                self.lower.send_positions([])
+                self.lower.send_positions([], color=color)
             return
 
         upper_positions = set()
@@ -403,9 +405,9 @@ class DualLEDController:
                     upper_positions.add(pos)
 
         if self.upper:
-            self.upper.send_positions(upper_positions)
+            self.upper.send_positions(upper_positions, color=color)
         if self.lower:
-            self.lower.send_positions(lower_positions)
+            self.lower.send_positions(lower_positions, color=color)
 
 
 class ArduinoSwitchListener(threading.Thread):
@@ -524,7 +526,7 @@ def log_release_position(position, state="RELEASED"):
                     pos_str = str(pos_val).strip()
                     if pos_str:
                         positions.append(pos_str)
-        LED_CONTROLLER.send_positions(positions)
+        LED_CONTROLLER.send_positions(positions, color=LED_ON_COLOR_SWITCH)
     else:
         print("LED controller unavailable; skipping LED updates for similars", flush=True)
 
@@ -1050,7 +1052,7 @@ class BookGUI(QMainWindow):
                     if pos_key and pos_key not in seen:
                         positions.append(pos_key)
                         seen.add(pos_key)
-        self.led_controller.send_positions(positions)
+        self.led_controller.send_positions(positions, color=LED_ON_COLOR_SEARCH)
 
     def append_chat_line(self, text):
         if not self.chat_display or not text:
