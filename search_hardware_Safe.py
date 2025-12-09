@@ -45,7 +45,7 @@ GEMINI_EMBED_MODEL = "models/text-embedding-004"
 DIAL_BAUDRATE = 115200
 # Arduino sketch uses 9600 baud by default; keep in sync here
 LED_BAUDRATE = 9600
-WINDOW_SIZE = 0.25  # similarity window width
+WINDOW_SIZE = 0.25  # similarity window width (legacy; bucketed mode ignores this)
 GEMINI_CHAT_MODEL = "models/gemini-2.5-flash-lite"
 LED_ON_COLOR = "#f6bc14"  # Match UI accent / Arduino default colour
 CHAT_SYSTEM_PROMPT = (
@@ -587,13 +587,47 @@ def get_top_books_by_query(query, books, book_embeddings, top_k=3, window=None):
     scores = []
     for i, book_vec in enumerate(book_embeddings):
         score = cosine_similarity(query_vec, book_vec)
-        if window:
-            low, high = window
-            if score < low or score > high:
-                continue
         scores.append((score, i))
     scores.sort(key=lambda x: x[0], reverse=True)
     return [idx for score, idx in scores[:top_k]]
+
+
+def get_bucketed_books_by_query(query, books, book_embeddings, dial_value, top_k=3):
+    """
+    Bucketed recommendations:
+    - dial in [0, ~0.33]: broader slice (lower similarity chunk)
+    - dial in (~0.33, ~0.66]: middle slice
+    - dial in (~0.66, 1]: highest similarity slice
+    """
+    query_vec = get_embedding(query)
+    if not query_vec:
+        return []
+
+    scores = []
+    for i, book_vec in enumerate(book_embeddings):
+        score = cosine_similarity(query_vec, book_vec)
+        scores.append((score, i))
+    if not scores:
+        return []
+
+    scores.sort(key=lambda x: x[0], reverse=True)
+    bucket_size = max(1, len(scores) // 3)
+    # Map dial to bucket index
+    if dial_value <= 1/3:
+        bucket_idx = 2  # broader / lower slice
+    elif dial_value <= 2/3:
+        bucket_idx = 1  # middle
+    else:
+        bucket_idx = 0  # top / most similar
+
+    start = bucket_idx * bucket_size
+    end = start + bucket_size
+    bucket = scores[start:end] if start < len(scores) else scores[-bucket_size:]
+    if not bucket:
+        bucket = scores[:bucket_size]
+
+    bucket = bucket[:top_k]
+    return [idx for score, idx in bucket]
 
 
 class FolderFrame(QWidget):
@@ -1055,14 +1089,14 @@ class BookGUI(QMainWindow):
     def show_query_results(self, query):
         if not query:
             return
-        self.clear_glow_effects()
         self.last_query = query
-        indices = get_top_books_by_query(
+        self.clear_glow_effects()
+        indices = get_bucketed_books_by_query(
             query,
             self.books,
             self.book_embeddings,
+            dial_value=self.dial_value,
             top_k=SHORTLIST_MAX_SIZE,
-            window=self.current_window_bounds(),
         )
         self.add_glow_to_books(indices)
         self.update_shortlist(indices)
@@ -1083,9 +1117,16 @@ class BookGUI(QMainWindow):
         high = min(1.0, center + half)
         return low, high
 
+    def current_bucket_label(self):
+        if self.dial_value <= 1/3:
+            return "0.10 – 0.35"
+        if self.dial_value <= 2/3:
+            return "0.35 – 0.65"
+        return "0.65 – 0.90"
+
     def update_window_label(self):
-        low, high = self.current_window_bounds()
-        self.window_label.setText(f"Similarity window: {low:.2f} – {high:.2f}")
+        bucket = self.current_bucket_label()
+        self.window_label.setText(f"Similarity window: {bucket}")
         if self.dial_reader:
             self.window_label.setVisible(True)
 
@@ -1115,7 +1156,6 @@ class BookGUI(QMainWindow):
             self.books,
             self.book_embeddings,
             top_k=3,
-            window=self.current_window_bounds()
         )
         
         self.add_glow_to_books([clicked_idx])
@@ -1128,17 +1168,16 @@ class BookGUI(QMainWindow):
 
     # [NEW] Book Similarity Indices
     def get_books_in_window(self):
-        """Get indices of books currently in the similarity window"""
+        """Get indices of books currently in the selected similarity bucket"""
         if not self.last_query:
             return []
-        
-        window = self.current_window_bounds()
-        indices = get_top_books_by_query(
+
+        indices = get_bucketed_books_by_query(
             self.last_query,
             self.books,
             self.book_embeddings,
+            dial_value=self.dial_value,
             top_k=SHORTLIST_MAX_SIZE,
-            window=window,
         )
         return indices
     
@@ -1158,14 +1197,13 @@ class BookGUI(QMainWindow):
     def refresh_highlights(self):
         if not self.last_query:
             return
-        window = self.current_window_bounds()
         self.clear_glow_effects()
-        indices = get_top_books_by_query(
+        indices = get_bucketed_books_by_query(
             self.last_query,
             self.books,
             self.book_embeddings,
+            dial_value=self.dial_value,
             top_k=SHORTLIST_MAX_SIZE,
-            window=window,
         )
         self.add_glow_to_books(indices)
 
