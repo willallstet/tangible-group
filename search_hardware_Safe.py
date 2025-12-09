@@ -298,8 +298,9 @@ class ChatManager:
 class LEDController:
     """Sends highlighted book positions to an Arduino over serial."""
 
-    def __init__(self, port=None, baudrate=LED_BAUDRATE):
-        self.port = port or os.environ.get("LED_SERIAL_PORT")
+    def __init__(self, port=None, baudrate=LED_BAUDRATE, env_var_name="LED_SERIAL_PORT"):
+        env_port = os.environ.get(env_var_name)
+        self.port = port or env_port
         self.baudrate = baudrate
         self.device = None
         self.last_sent = set()
@@ -309,7 +310,7 @@ class LEDController:
             return
 
         if not self.port:
-            print("LEDController: set LED_SERIAL_PORT to your Arduino device path.")
+            print(f"LEDController: set {env_var_name} to your Arduino device path.")
             return
 
         # Try the specified port, then try alternative paths if it fails
@@ -367,6 +368,40 @@ class LEDController:
             self.device.flush()
         except Exception as exc:
             print(f"LEDController flush error: {exc}")
+
+
+class DualLEDController:
+    """Routes LED updates to upper/lower controllers based on position prefix."""
+
+    def __init__(self, upper=None, lower=None):
+        self.upper = upper
+        self.lower = lower
+
+    def send_positions(self, positions):
+        # Normalize first
+        normalized = {str(pos).strip() for pos in positions if pos is not None and str(pos).strip()}
+        # If no positions, turn everything off on both controllers
+        if not normalized:
+            if self.upper:
+                self.upper.send_positions([])
+            if self.lower:
+                self.lower.send_positions([])
+            return
+
+        upper_positions = set()
+        lower_positions = set()
+        for pos in normalized:
+            prefix = pos[:1].upper() if pos else ""
+            if prefix == "B" and self.lower:
+                lower_positions.add(pos)
+            else:
+                if self.upper:
+                    upper_positions.add(pos)
+
+        if self.upper:
+            self.upper.send_positions(upper_positions)
+        if self.lower:
+            self.lower.send_positions(lower_positions)
 
 
 def load_data(filename):
@@ -1110,10 +1145,31 @@ def main():
             dial_reader = reader
         else:
             print("DialReader could not find a serial device; dial disabled.")
-        led_controller = LEDController()
-        # Expose LED controller globally for serial event LED updates
-        global LED_CONTROLLER
-        LED_CONTROLLER = led_controller
+        # Upper row Arduino (default): UPPER_LEVEL_ARDUINO or legacy LED_SERIAL_PORT
+        upper_port = os.environ.get("UPPER_LEVEL_ARDUINO") or os.environ.get("LED_SERIAL_PORT")
+        upper_ctrl = None
+        if upper_port:
+            upper_ctrl = LEDController(port=upper_port, env_var_name="UPPER_LEVEL_ARDUINO")
+            if not upper_ctrl.device:
+                upper_ctrl = None
+        else:
+            print("LEDController: set UPPER_LEVEL_ARDUINO (or LED_SERIAL_PORT) for the upper row.")
+
+        # Lower row Arduino: LOWER_LEVEL_ARDUINO
+        lower_port = os.environ.get("LOWER_LEVEL_ARDUINO")
+        lower_ctrl = None
+        if lower_port:
+            lower_ctrl = LEDController(port=lower_port, env_var_name="LOWER_LEVEL_ARDUINO")
+            if not lower_ctrl.device:
+                lower_ctrl = None
+        elif os.environ.get("LOWER_LEVEL_ARDUINO") is None:
+            print("LEDController: set LOWER_LEVEL_ARDUINO for the lower row (optional).")
+
+        # Combine into a dual controller that routes by position prefix
+        if upper_ctrl or lower_ctrl:
+            led_controller = DualLEDController(upper=upper_ctrl, lower=lower_ctrl)
+            global LED_CONTROLLER
+            LED_CONTROLLER = led_controller
 
     chat_manager = ChatManager()
 
