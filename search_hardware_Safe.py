@@ -26,6 +26,7 @@ from PyQt5.QtGui import (
     QPen
 )
 import datetime
+import errno
 
 try:
     import serial  # type: ignore
@@ -58,6 +59,9 @@ SHORTLIST_FILE_CANDIDATES = [
     Path(os.environ.get("SELECTED_BOOK_FILE", "/selected_book.txt")),
     Path(__file__).resolve().parent / "selectedBook.txt",
 ]
+CIRCUITPY_SELECTED_PATH = Path(
+    os.environ.get("CIRCUITPY_SELECTED_FILE", "/Volumes/CIRCUITPY/selectedBook.txt")
+)
 # Global lookup caches for book metadata and embeddings
 BOOK_INDEX_BY_POSITION = {}
 BOOKS_DATA = []
@@ -138,6 +142,19 @@ def generate_poetic_description(title, author):
     return _trim_word_limit(raw, 10)
 
 
+def write_circuitpy_selected_book(payload):
+    """Mirror the shortlist onto a mounted CIRCUITPY drive when present."""
+    parent = CIRCUITPY_SELECTED_PATH.parent
+    try:
+        if not parent.exists():
+            print(f"CIRCUITPY not mounted at {parent}; skipping device write.")
+            return
+        CIRCUITPY_SELECTED_PATH.write_text(payload, encoding="utf-8")
+        print(f"Wrote shortlist to {CIRCUITPY_SELECTED_PATH}")
+    except Exception as exc:
+        print(f"Error writing shortlist to {CIRCUITPY_SELECTED_PATH}: {exc}")
+
+
 def detect_serial_port():
     """Return the first USB serial port that looks like the QT Py."""
     ports = glob.glob("/dev/tty.usbmodem*") + glob.glob("/dev/tty.usbserial*")
@@ -156,27 +173,37 @@ class DialReader(threading.Thread):
         self.ser = None  # ADD THIS LINE
         self.next_press_time = 0.0  # debounce window for press events
         self.next_release_time = 0.0  # debounce window for release events
+        self._silence_log_secs = 3
 
     def run(self):
         if serial is None or not self.port:
             return
         try:
             self.ser = serial.Serial(self.port, self.baudrate, timeout=1)  # Store reference
+            try:
+                print(f"DialReader opened {self.port} @ {self.baudrate}", flush=True)
+            except Exception:
+                pass
         except Exception as exc:
             print(f"DialReader could not open {self.port}: {exc}")
             return
 
+        last_rx = time.time()
         # REMOVE the 'with' statement - keep the connection open
         while True:
             try:
                 line = self.ser.readline().strip()
                 if not line:
+                    now = time.time()
+                    if now - last_rx >= self._silence_log_secs:
+                        last_rx = now
                     continue
                 # Log every incoming serial payload for visibility
                 try:
                     print(f"DialReader RX raw: {line!r}", flush=True)
                 except Exception:
                     pass
+                last_rx = time.time()
 
                 # If this is a release event, log the corresponding book and skip numeric parsing
                 text_line = None
@@ -188,47 +215,24 @@ class DialReader(threading.Thread):
                 else:
                     text_line = str(line)
 
-                # Turn off all LEDs on RELEASED events
-                if text_line and "RELEASED" in text_line.upper():
-                    now = time.time()
-                    if now < self.next_release_time:
-                        try:
-                            remaining = self.next_release_time - now
-                            print(f"DialReader RELEASED ignored (debounce {remaining:.2f}s remaining)", flush=True)
-                        except Exception:
-                            pass
-                        continue
-                    self.next_release_time = now + 3.0
-                    if LED_CONTROLLER:
-                        try:
-                            LED_CONTROLLER.send_positions([])
-                            print("DialReader RELEASED: turning all LEDs off", flush=True)
-                        except Exception as exc:
-                            print(f"DialReader RELEASED: LED off error: {exc}", flush=True)
-                    else:
-                        print("DialReader RELEASED: LED controller unavailable; cannot turn off", flush=True)
-                    continue
-
-                if text_line and "PRESSED" in text_line.upper():
-                    now = time.time()
-                    if now < self.next_press_time:
-                        try:
-                            remaining = self.next_press_time - now
-                            print(f"DialReader PRESSED ignored (debounce {remaining:.2f}s remaining)", flush=True)
-                        except Exception:
-                            pass
-                        continue
-                    self.next_press_time = now + 3.0
-                    position = text_line.split(",", 1)[0].strip()
-                    log_release_position(position)
+                # Dial only controls similarity window; ignore PRESSED/RELEASED tokens
+                if text_line and ("RELEASED" in text_line.upper() or "PRESSED" in text_line.upper()):
                     continue
 
                 try:
                     raw = float(line)
                 except ValueError:
+                    try:
+                        print(f"DialReader non-numeric line: {text_line!r}", flush=True)
+                    except Exception:
+                        pass
                     continue
                 if raw > 1:
                     raw = raw / 1023.0  # handle 0-1023 readings
+                try:
+                    print(f"DialReader numeric raw={raw:.3f}", flush=True)
+                except Exception:
+                    pass
                 raw = max(0.0, min(1.0, raw))
                 self.value = raw
             except Exception as e:
@@ -404,6 +408,51 @@ class DualLEDController:
             self.lower.send_positions(lower_positions)
 
 
+class ArduinoSwitchListener(threading.Thread):
+    """Background reader that listens for PRESSED/RELEASED events from an Arduino."""
+
+    def __init__(self, device, name):
+        super().__init__(daemon=True)
+        self.device = device
+        self.name = name
+
+    def run(self):
+        if not self.device:
+            return
+        while True:
+            try:
+                line = self.device.readline()
+                if not line:
+                    continue
+                if isinstance(line, bytes):
+                    try:
+                        text_line = line.decode("utf-8", "ignore")
+                    except Exception:
+                        text_line = ""
+                else:
+                    text_line = str(line)
+                text_line = text_line.strip()
+                if not text_line:
+                    continue
+                try:
+                    print(f"{self.name} switch RX: {text_line!r}", flush=True)
+                except Exception:
+                    pass
+
+                parts = [p.strip() for p in text_line.split(",")]
+                if len(parts) < 2:
+                    continue
+                position, state = parts[0], parts[1].upper()
+                if state in ("PRESSED", "RELEASED"):
+                    log_release_position(position, state=state)
+            except Exception as exc:
+                try:
+                    print(f"{self.name} switch listener error: {exc}", flush=True)
+                except Exception:
+                    pass
+                time.sleep(0.5)
+
+
 def load_data(filename):
     import codecs
     with codecs.open(filename, "r", encoding="utf-8", errors='replace') as f:
@@ -419,28 +468,30 @@ def build_book_index(books):
             BOOK_INDEX_BY_POSITION[pos.upper()] = idx
 
 
-def log_release_position(position):
+def log_release_position(position, state="RELEASED"):
     """Log the book title/author that matches a PRESSED/RELEASED serial event and similar titles."""
     pos_key = (position or "").strip()
+    source = "LOWER_LEVEL_ARDUINO" if pos_key[:1].upper() == "B" else "UPPER_LEVEL_ARDUINO"
+    state = (state or "RELEASED").upper()
     if not pos_key:
-        print("DialReader RELEASED with empty position", flush=True)
+        print(f"{source} {state} with empty position", flush=True)
         return
     idx = BOOK_INDEX_BY_POSITION.get(pos_key.upper())
     if idx is None:
-        print(f"DialReader RELEASED at {pos_key}: no matching book in books.json", flush=True)
+        print(f"{source} {state} at {pos_key}: no matching book in books.json", flush=True)
         return
 
     if not BOOKS_DATA or idx < 0 or idx >= len(BOOKS_DATA):
-        print(f"DialReader RELEASED at {pos_key}: book index out of range", flush=True)
+        print(f"{source} {state} at {pos_key}: book index out of range", flush=True)
         return
 
     book = BOOKS_DATA[idx]
     title = book.get("Title", "Unknown")
     author = book.get("Author", "Unknown")
-    print(f"DialReader RELEASED at {pos_key}: {title} by {author}", flush=True)
+    print(f"{source} {state} at {pos_key}: {title} by {author}", flush=True)
 
     if not BOOK_EMBEDDINGS or idx >= len(BOOK_EMBEDDINGS):
-        print("DialReader RELEASED: embeddings not available; cannot fetch similars", flush=True)
+        print(f"{source} {state}: embeddings not available; cannot fetch similars", flush=True)
         return
 
     similar_indices = [
@@ -448,7 +499,7 @@ def log_release_position(position):
         if i != idx
     ]
     if not similar_indices:
-        print("DialReader RELEASED: no similar books found", flush=True)
+        print(f"{source} {state}: no similar books found", flush=True)
         return
 
     similar_titles = []
@@ -459,7 +510,7 @@ def log_release_position(position):
             sim_author = sim_book.get("Author", "Unknown")
             similar_titles.append(f"{sim_title} by {sim_author}")
     if similar_titles:
-        print(f"DialReader RELEASED similars: {', '.join(similar_titles)}", flush=True)
+        print(f"{source} {state} similars: {', '.join(similar_titles)}", flush=True)
 
     # Light up the similar books using the LED controller
     if LED_CONTROLLER:
@@ -873,7 +924,11 @@ class BookGUI(QMainWindow):
                 path.write_text(payload, encoding="utf-8")
                 print(f"Wrote shortlist to {path}")
             except Exception as exc:
+                # Suppress noisy errors on read-only filesystems (e.g., /selected_book.txt)
+                if isinstance(exc, PermissionError) or getattr(exc, "errno", None) == errno.EROFS:
+                    continue
                 print(f"Error writing shortlist to {path}: {exc}")
+        write_circuitpy_selected_book(payload)
 
     @staticmethod
     def format_shortlist_line(entry):
@@ -1170,6 +1225,12 @@ def main():
             led_controller = DualLEDController(upper=upper_ctrl, lower=lower_ctrl)
             global LED_CONTROLLER
             LED_CONTROLLER = led_controller
+
+        # Listen for switch events from the Arduinos (book presence switches)
+        if upper_ctrl and upper_ctrl.device:
+            ArduinoSwitchListener(upper_ctrl.device, name="UPPER_LEVEL_ARDUINO").start()
+        if lower_ctrl and lower_ctrl.device:
+            ArduinoSwitchListener(lower_ctrl.device, name="LOWER_LEVEL_ARDUINO").start()
 
     chat_manager = ChatManager()
 

@@ -59,6 +59,9 @@ SHORTLIST_FILE_CANDIDATES = [
     Path(os.environ.get("SELECTED_BOOK_FILE", "selected_book.txt")),
     Path(__file__).resolve().parent / "selectedBook.txt",
 ]
+CIRCUITPY_SELECTED_PATH = Path(
+    os.environ.get("CIRCUITPY_SELECTED_FILE", "/Volumes/CIRCUITPY/selectedBook.txt")
+)
 
 _description_model = None
 
@@ -130,6 +133,19 @@ def generate_poetic_description(title, author):
     if not raw:
         return "Description unavailable."
     return _trim_word_limit(raw, 10)
+
+
+def write_circuitpy_selected_book(payload):
+    """Mirror the shortlist onto a mounted CIRCUITPY drive when present."""
+    parent = CIRCUITPY_SELECTED_PATH.parent
+    try:
+        if not parent.exists():
+            print(f"CIRCUITPY not mounted at {parent}; skipping device write.")
+            return
+        CIRCUITPY_SELECTED_PATH.write_text(payload, encoding="utf-8")
+        print(f"Wrote shortlist to {CIRCUITPY_SELECTED_PATH}")
+    except Exception as exc:
+        print(f"Error writing shortlist to {CIRCUITPY_SELECTED_PATH}: {exc}")
 
 
 def detect_serial_port():
@@ -731,13 +747,14 @@ class BookGUI(QMainWindow):
         """Write shortlist to disk in all configured locations."""
         lines = [self.format_shortlist_line(item) for item in self.shortlist[:SHORTLIST_MAX_SIZE]]
         payload = "\n".join(lines)
-        # Write to D:\selectedBook.txt
+        # Write to a local selectedBook.txt beside this script
+        selected_path = Path(__file__).resolve().parent / "selectedBook.txt"
         try:
-            with open("D:/selectedBook.txt", "w", encoding="utf-8") as f:
-                f.write(payload)
-            print("Wrote shortlist to D:/selectedBook.txt")
+            selected_path.parent.mkdir(parents=True, exist_ok=True)
+            selected_path.write_text(payload, encoding="utf-8")
+            print(f"Wrote shortlist to {selected_path}")
         except Exception as exc:
-            print(f"Error writing shortlist to D:/selectedBook.txt: {exc}")
+            print(f"Error writing shortlist to {selected_path}: {exc}")
         for path in self.shortlist_paths:
             try:
                 path.parent.mkdir(parents=True, exist_ok=True)
@@ -745,6 +762,7 @@ class BookGUI(QMainWindow):
                 print(f"Wrote shortlist to {path}")
             except Exception as exc:
                 print(f"Error writing shortlist to {path}: {exc}")
+        write_circuitpy_selected_book(payload)
 
     @staticmethod
     def format_shortlist_line(entry):
